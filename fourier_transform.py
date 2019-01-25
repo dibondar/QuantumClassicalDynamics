@@ -8,6 +8,8 @@ Compare different ways of computing the continuous Fourier transform
 
 print(__doc__)
 
+np.random.seed(5464)
+
 ############################################################################
 #
 #   parameters defining the coordinate grid
@@ -119,7 +121,7 @@ def frft(x, alpha):
         np.exp(np.pi * 1j * (k - x.size)**2 * alpha)
     ])
 
-    G =  fftpack.ifft(
+    G = fftpack.ifft(
         fftpack.fft(y, overwrite_x=True) * fftpack.fft(z, overwrite_x=True),
         overwrite_x=True
     )
@@ -127,7 +129,7 @@ def frft(x, alpha):
     return np.exp(-np.pi * 1j * k**2 * alpha) * G[:x.size]
 
 # generate the desired momentum grid
-P_amplitude = 3. * alpha
+P_amplitude = 0.5 * alpha
 dP = 2. * P_amplitude / X_gridDIM
 P = (k - X_gridDIM / 2) * dP
 
