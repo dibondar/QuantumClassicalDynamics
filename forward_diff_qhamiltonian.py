@@ -1,87 +1,33 @@
 import numpy as np
-import numexpr as ne
 from scipy.sparse import diags # Construct a sparse matrix from diagonals
-# from scipy.sparse import linalg # Linear algebra for sparse matrix
-from scipy import linalg # Linear algebra for dense matrix
-from types import MethodType, FunctionType
 
 
 class ForwardDiffQHamiltonian:
     """
-     Construct the quantum Hamiltonian for an 1D system in the coordinate representation
-     using the forward difference approximation.
-     """
-    def __init__(self, **kwargs):
+    Construct the quantum Hamiltonian for an 1D system in the coordinate representation
+    using the forward finite difference approximation.
+    """
+    def __init__(self, *, x_grid_dim, x_amplitude, v):
         """
          The following parameters must be specified
-             X_gridDIM - the grid size
-             X_amplitude - the maximum value of the coordinates
-             V - a potential energy (as a string to be evaluated by numexpr)
+             x_grid_dim - the grid size
+             x_amplitude - the maximum value of the coordinates
+             v - a potential energy (as a function)
          """
-
-        # save all attributes
-        for name, value in kwargs.items():
-            # if the value supplied is a function, then dynamically assign it as a method;
-            if isinstance(value, FunctionType):
-                setattr(self, name, MethodType(value, self))
-            # otherwise bind it as a property
-            else:
-                setattr(self, name, value)
-
-        # Check that all attributes were specified
-        try:
-            self.X_gridDIM
-        except AttributeError:
-            raise AttributeError("Grid size (X_gridDIM) was not specified")
-
-        try:
-            self.X_amplitude
-        except AttributeError:
-            raise AttributeError("Coordinate range (X_amplitude) was not specified")
-
-        try:
-            self.V
-        except AttributeError:
-            raise AttributeError("Potential energy (V) was not specified")
+        # saving the properties
+        self.x_grid_dim = x_grid_dim
+        self.x_amplitude = x_amplitude
+        self.v = v
 
         # generate coordinate range
-        self.X = np.linspace(-self.X_amplitude, self.X_amplitude, self.X_gridDIM)
+        self.x = np.linspace(-self.x_amplitude, self.x_amplitude, self.x_grid_dim)
 
         # save the coordinate step size
-        self.dX = self.X[1] - self.X[0]
+        self.dx = self.x[1] - self.x[0]
 
         # Construct the kinetic energy part as sparse matrix from diagonal
-        self.Hamiltonian = diags([1., -2., 1.], [0, 1, 2], shape=(self.X_gridDIM, self.X_gridDIM))
-        self.Hamiltonian *= -0.5 / (self.dX ** 2)
+        self.hamiltonian = diags([1., -2., 1.], [0, 1, 2], shape=(self.x_grid_dim, self.x_grid_dim))
+        self.hamiltonian *= -0.5 / (self.dx ** 2)
 
         # Add diagonal potential energy
-        V = ne.evaluate(self.V, local_dict=vars(self))
-        self.Hamiltonian += diags(V, 0)
-
-##############################################################################
-#
-#   Run some examples
-#
-##############################################################################
-
-if __name__ == '__main__':
-
-    print(ForwardDiffQHamiltonian.__doc__)
-
-    for omega in [4., 8.]:
-        # Find energies of a harmonic oscillator V = 0.5*(omega*x)**2
-        harmonic_osc = ForwardDiffQHamiltonian(
-                            X_gridDIM=512,
-                            X_amplitude=5.,
-                            omega=omega,
-                            V="0.5 * (omega * X) ** 2",
-                        )
-
-        # get energies using the dense linear algebra
-        energies = linalg.eigvals(harmonic_osc.Hamiltonian.toarray())
-
-        # sort energies by real part
-        energies = energies[np.argsort(energies.real)]
-
-        print("\n\nFirst energies for harmonic oscillator with omega = {}".format(omega))
-        print(energies[:20])
+        self.hamiltonian += diags(self.v(self.x), 0)
