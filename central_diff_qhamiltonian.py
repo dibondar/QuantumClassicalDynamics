@@ -8,12 +8,13 @@ class CentralDiffQHamiltonian:
     Construct the quantum Hamiltonian for an 1D system in the coordinate representation
     using the central finite difference approximation.
     """
-    def __init__(self, *, x_grid_dim, x_amplitude, v):
+    def __init__(self, *, x_grid_dim, x_amplitude, v, **kwargs):
         """
          The following parameters must be specified
              x_grid_dim - the grid size
              x_amplitude - the maximum value of the coordinates
              v - a potential energy (as a function)
+             kwargs - is ignored
          """
         # saving the properties
         self.x_grid_dim = x_grid_dim

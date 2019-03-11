@@ -1,88 +1,61 @@
 import numpy as np
-import numexpr as ne
 from scipy import fftpack # Tools for fourier transform
 from scipy import linalg # Linear algebra for dense matrix
-from types import MethodType, FunctionType
 
 
-class MUBQHamiltonian:
+class MUBQHamiltonian(object):
     """
     Generate quantum Hamiltonian, H(x,p) = K(p) + V(x),
     for 1D system in the coordinate representation using mutually unbiased bases (MUB).
     """
-    def __init__(self, **kwargs):
+    def __init__(self, *, x_grid_dim, x_amplitude, v, k, **kwargs):
         """
-        The following parameters must be specified
-            X_gridDIM - specifying the grid size
-            X_amplitude - maximum value of the coordinates
-            V - potential energy (as a string to be evaluated by numexpr)
-            K - momentum dependent part of the hamiltonian (as a string to be evaluated by numexpr)
-        """
-
-        # save all attributes
-        for name, value in kwargs.items():
-            # if the value supplied is a function, then dynamically assign it as a method;
-            if isinstance(value, FunctionType):
-                setattr(self, name, MethodType(value, self))
-            # otherwise bind it as a property
-            else:
-                setattr(self, name, value)
+         The following parameters must be specified
+             x_grid_dim - the grid size
+             x_amplitude - the maximum value of the coordinates
+             v - a potential energy (as a function)
+             kwargs is ignored
+         """
+        # saving the properties
+        self.x_grid_dim = x_grid_dim
+        self.x_amplitude = x_amplitude
+        self.v = v
+        self.k = k
 
         # Check that all attributes were specified
-        try:
-            # make sure self.X_amplitude has a value of power of 2
-            assert 2 ** int(np.log2(self.X_gridDIM)) == self.X_gridDIM, \
-                "A value of the grid size (X_gridDIM) must be a power of 2"
-        except AttributeError:
-            raise AttributeError("Grid size (X_gridDIM) was not specified")
-
-        try:
-            self.X_amplitude
-        except AttributeError:
-            raise AttributeError("Coordinate range (X_amplitude) was not specified")
-
-        try:
-            self.V
-        except AttributeError:
-            raise AttributeError("Potential energy (V) was not specified")
-
-        try:
-            self.K
-        except AttributeError:
-            raise AttributeError("Momentum dependence (K) was not specified")
+        # make sure self.x_amplitude has a value of power of 2
+        assert 2 ** int(np.log2(self.x_grid_dim)) == self.x_grid_dim, \
+            "A value of the grid size (x_grid_dim) must be a power of 2"
 
         # get coordinate step size
-        self.dX = 2. * self.X_amplitude / self.X_gridDIM
+        self.dx = 2. * self.x_amplitude / self.x_grid_dim
 
         # generate coordinate range
-        k = np.arange(self.X_gridDIM)
-        self.X = (k - self.X_gridDIM / 2) * self.dX
+        k = np.arange(self.x_grid_dim)
+        self.x = (k - self.x_grid_dim / 2) * self.dx
         # The same as
-        # self.X = np.linspace(-self.X_amplitude, self.X_amplitude - self.dX , self.X_gridDIM)
+        # self.x = np.linspace(-self.x_amplitude, self.x_amplitude - self.dx , self.x_grid_dim)
 
         # generate momentum range as it corresponds to FFT frequencies
-        self.P = (k - self.X_gridDIM / 2) * (np.pi / self.X_amplitude)
+        self.p = (k - self.x_grid_dim / 2) * (np.pi / self.x_amplitude)
 
         # 2D array of alternating signs
         minus = (-1) ** (k[:, np.newaxis] + k[np.newaxis, :])
         # see http://docs.scipy.org/doc/numpy/reference/arrays.indexing.html
         # for explanation of np.newaxis and other array indexing operations
         # also https://docs.scipy.org/doc/numpy/user/basics.broadcasting.html
-        # for understanding the broadcasting in array operations
+        # for understanding the broadcasting in array operations    
 
         # Construct the momentum dependent part
-        self.Hamiltonian = np.diag(
-            ne.evaluate(self.K, local_dict=vars(self))
-        )
-        self.Hamiltonian *= minus
-        self.Hamiltonian = fftpack.fft(self.Hamiltonian, axis=1, overwrite_x=True)
-        self.Hamiltonian = fftpack.ifft(self.Hamiltonian, axis=0, overwrite_x=True)
-        self.Hamiltonian *= minus
+        self.hamiltonian = np.diag(self.k(self.p))
+        
+        self.hamiltonian *= minus
+        self.hamiltonian = fftpack.fft(self.hamiltonian, axis=1, overwrite_x=True)
+        self.hamiltonian = fftpack.ifft(self.hamiltonian, axis=0, overwrite_x=True)
+        self.hamiltonian *= minus
 
         # Add diagonal potential energy
-        self.Hamiltonian += np.diag(
-            ne.evaluate(self.V, local_dict=vars(self))
-        )
+        self.hamiltonian += np.diag(self.v(self.x))
 
     def get_eigenstate(self, n):
         """
@@ -115,7 +88,7 @@ class MUBQHamiltonian:
             # eigenstates have not been calculated so
             # get real sorted energies and underlying wavefunctions
             # using specialized function for Hermitian matrices
-            self.energies, self.eigenstates = linalg.eigh(self.Hamiltonian)
+            self.energies, self.eigenstates = linalg.eigh(self.hamiltonian)
 
             # extract real part of the energies
             self.energies = np.real(self.energies)
@@ -125,56 +98,9 @@ class MUBQHamiltonian:
 
             # normalize each eigenvector
             for psi in self.eigenstates:
-                psi /= linalg.norm(psi) * np.sqrt(self.dX)
+                psi /= linalg.norm(psi) * np.sqrt(self.dx)
 
             # Make sure that the ground state is non negative
             np.abs(self.eigenstates[0], out=self.eigenstates[0])
 
         return self
-
-##############################################################################
-#
-#   Run some examples
-#
-##############################################################################
-
-if __name__ == '__main__':
-
-    import matplotlib.pyplot as plt # Plotting facility
-
-    print(MUBQHamiltonian.__doc__)
-
-    for omega in [4., 8.]:
-        # Find energies of a harmonic oscillator V = 0.5*(omega*x)**2
-        harmonic_osc = MUBQHamiltonian(
-                            X_gridDIM=512,
-                            X_amplitude=5.,
-                            omega=omega,
-                            V="0.5 * (omega * X) ** 2",
-                            K="0.5 * P ** 2",
-                        )
-
-        """
-        # Display the potential energy
-        plt.title("Potential energy")
-        plt.plot(
-            harmonic_osc.X,
-            ne.evaluate(harmonic_osc.V, local_dict=vars(harmonic_osc))
-        )
-        plt.xlabel('$x$ (a.u.)')
-        plt.ylabel('Potential energy $V$ (a.u.)')
-        plt.show()
-        """
-
-        # plot eigenfunctions
-        for n in range(4):
-            plt.plot(harmonic_osc.X, harmonic_osc.get_eigenstate(n).real, label=str(n))
-
-        print("\n\nFirst energies for harmonic oscillator with omega = {}".format(omega))
-        print(harmonic_osc.energies[:20])
-
-        plt.title("Eigenfunctions for harmonic oscillator with omega = {} (a.u.)".format(omega))
-        plt.xlabel('$x$ (a.u.)')
-        plt.ylabel('wave functions ($\\psi_n(x)$)')
-        plt.legend()
-        plt.show()
