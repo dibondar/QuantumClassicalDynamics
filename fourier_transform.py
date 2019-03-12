@@ -16,16 +16,16 @@ np.random.seed(5464)
 #
 ############################################################################
 
-X_gridDIM = 512
-X_amplitude = 5.
+x_grid_dim = 512
+x_amplitude = 5.
 
 ############################################################################
 
-k = np.arange(X_gridDIM)
-dX = 2 * X_amplitude / X_gridDIM
+k = np.arange(x_grid_dim)
+dx = 2 * x_amplitude / x_grid_dim
 
 # the coordinate grid
-X = (k - X_gridDIM / 2) * dX
+x = (k - x_grid_dim / 2) * dx
 
 ############################################################################
 #
@@ -37,17 +37,17 @@ X = (k - X_gridDIM / 2) * dX
 alpha = np.random.uniform(1., 10.)
 
 # randomly generate the displacement of the gaussian
-a = np.random.uniform(0., 0.2 * X_amplitude)
+a = np.random.uniform(0., 0.2 * x_amplitude)
 
 # original function
-f = np.exp(-alpha * (X - a) ** 2)
+f = np.exp(-alpha * (x - a) ** 2)
 
 # the exact continious Fourier transform
-FT_exact = lambda p: np.exp(-1j * a * p - p ** 2 / (4. * alpha)) * np.sqrt(np.pi / alpha)
+ft_exact = lambda p: np.exp(-1j * a * p - p ** 2 / (4. * alpha)) * np.sqrt(np.pi / alpha)
 
 plt.subplot(221)
 plt.title('Original function')
-plt.plot(X, f)
+plt.plot(x, f)
 plt.xlabel('$x$')
 plt.ylabel('$\\exp(-\\alpha x^2)$')
 
@@ -62,15 +62,15 @@ plt.ylabel('$\\exp(-\\alpha x^2)$')
 FT_incorrect = fftpack.fft(f)
 
 # get the corresponding momentum grid
-P = fftpack.fftfreq(X_gridDIM, dX / (2. * np.pi))
+p = fftpack.fftfreq(x_grid_dim, dx / (2. * np.pi))
 
 plt.subplot(222)
 plt.title("Incorrect method")
 
-plt.plot(P, FT_incorrect.real, label='real FFT')
-plt.plot(P, FT_incorrect.imag, label='imag FFT')
-plt.plot(P, FT_exact(P).real, label='real exact')
-plt.plot(P, FT_exact(P).imag, label='imag exact')
+plt.plot(p,FT_incorrect.real, label='real FFT')
+plt.plot(p,FT_incorrect.imag, label='imag FFT')
+plt.plot(p,ft_exact(p).real, label='real exact')
+plt.plot(p,ft_exact(p).imag, label='imag exact')
 
 plt.legend()
 plt.xlabel('$p$')
@@ -82,17 +82,17 @@ plt.xlabel('$p$')
 #
 ############################################################################
 minus = (-1) ** k
-FT_approx1 = dX * minus * fftpack.fft(minus * f, overwrite_x=True)
+ft_approx1 = dx * minus * fftpack.fft(minus * f, overwrite_x=True)
 
 # get the corresponding momentum grid
-P = (k - X_gridDIM / 2) * (np.pi / X_amplitude)
+p = (k - x_grid_dim / 2) * (np.pi / x_amplitude)
 
 plt.subplot(223)
 plt.title("Correct method #1 (using FFT)")
-plt.plot(P, FT_approx1.real, label='real approximate')
-plt.plot(P, FT_approx1.imag, label='imag approximate')
-plt.plot(P, FT_exact(P).real, label='real exact')
-plt.plot(P, FT_exact(P).imag, label='imag exact')
+plt.plot(p, ft_approx1.real, label='real approximate')
+plt.plot(p, ft_approx1.imag, label='imag approximate')
+plt.plot(p, ft_exact(p).real, label='real exact')
+plt.plot(p, ft_exact(p).imag, label='imag exact')
 plt.legend()
 plt.xlabel('$p$')
 
@@ -129,21 +129,22 @@ def frft(x, alpha):
     return np.exp(-np.pi * 1j * k**2 * alpha) * G[:x.size]
 
 # generate the desired momentum grid
-P_amplitude = 0.5 * alpha
-dP = 2. * P_amplitude / X_gridDIM
-P = (k - X_gridDIM / 2) * dP
+p_amplitude = 1. * alpha
 
-delta = dX * dP / (2. * np.pi)
+dp = 2. * p_amplitude / x_grid_dim
+p = (k - x_grid_dim / 2) * dp
 
-FT_approx2 = dX * np.exp(np.pi * 1j * (k - X_gridDIM / 2) * X_gridDIM * delta) * \
-             frft(f * np.exp(np.pi * 1j * k * X_gridDIM * delta), delta)
+delta = dx * dp / (2. * np.pi)
+
+ft_approx2 = dx * np.exp(np.pi * 1j * (k - x_grid_dim / 2) * x_grid_dim * delta) * \
+             frft(f * np.exp(np.pi * 1j * k * x_grid_dim * delta), delta)
 
 plt.subplot(224)
 plt.title("Correct method #2 (using FRFT)")
-plt.plot(P, FT_approx2.real, label='real approximate')
-plt.plot(P, FT_approx2.imag, label='imag approximate')
-plt.plot(P, FT_exact(P).real, label='real exact')
-plt.plot(P, FT_exact(P).imag, label='imag exact')
+plt.plot(p, ft_approx2.real, label='real approximate')
+plt.plot(p, ft_approx2.imag, label='imag approximate')
+plt.plot(p, ft_exact(p).real, label='real exact')
+plt.plot(p, ft_exact(p).imag, label='imag exact')
 plt.legend()
 plt.xlabel('$p$')
 

@@ -13,7 +13,8 @@ class MUBQHamiltonian(object):
          The following parameters must be specified
              x_grid_dim - the grid size
              x_amplitude - the maximum value of the coordinates
-             v - a potential energy (as a function)
+             v - the potential energy (as a function)
+             k - the kinetic energy (as a function)
              kwargs is ignored
          """
         # saving the properties
