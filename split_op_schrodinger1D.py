@@ -57,17 +57,26 @@ class SplitOpSchrodinger1D(object):
 
         ####################################################################################################
         #
-        #
+        # Codes for efficient evaluation
         #
         ####################################################################################################
 
-        @njit
-        def expV(wavefunction, t):
-            """
-            function to efficiently evaluate
-                wavefunction *= (-1) ** k * exp(-0.5j * dt * v)
-            """
-            wavefunction *= (-1) ** np.arange(wavefunction.size) * np.exp(-0.5j * dt * v(x, t))
+        if isinstance(abs_boundary, FunctionType):
+            @njit
+            def expV(wavefunction, t):
+                """
+                function to efficiently evaluate
+                    wavefunction *= (-1) ** k * exp(-0.5j * dt * v)
+                """
+                wavefunction *= (-1) ** np.arange(wavefunction.size) * abs_boundary(x) * np.exp(-0.5j * dt * v(x, t))
+        else:
+            @njit
+            def expV(wavefunction, t):
+                """
+                function to efficiently evaluate
+                    wavefunction *= (-1) ** k * exp(-0.5j * dt * v)
+                """
+                wavefunction *= (-1) ** np.arange(wavefunction.size) * abs_boundary * np.exp(-0.5j * dt * v(x, t))
 
         self.expV = expV
 
@@ -85,11 +94,15 @@ class SplitOpSchrodinger1D(object):
         if diff_k and diff_v:
 
             # Get codes for efficiently calculating the Ehrenfest relations
+
             @njit
-            def get_p_average_rhs(density):
-                return np.sum(density * p)
+            def get_p_average_rhs(density, t):
+                return np.sum(density * diff_v(x, t))
 
             self.get_p_average_rhs = get_p_average_rhs
+
+            # The code above is equivalent to
+            # self.get_p_average_rhs = njit(lambda density, t: np.sum(density * diff_v(x, t)))
 
             @njit
             def get_v_average(density, t):
@@ -139,10 +152,10 @@ class SplitOpSchrodinger1D(object):
             self.minus = (-1) ** np.arange(self.x_grid_dim)
 
             # Flag requesting tha the Ehrenfest theorem calculations
-            self.isEhrenfest = True
+            self.is_ehrenfest = True
         else:
-            # Since diff_v and diff_k are not specified,
-            self.isEhrenfest = False
+            # Since diff_v and diff_k are not specified, we are not going to evaluate the Ehrenfest relations
+            self.is_ehrenfest = False
 
     def propagate(self, time_steps=1):
         """
@@ -156,7 +169,7 @@ class SplitOpSchrodinger1D(object):
             self.single_step_propagation()
 
             # calculate the Ehrenfest theorems
-            self.get_Ehrenfest()
+            self.get_ehrenfest()
 
         return self.wavefunction
 
@@ -196,11 +209,11 @@ class SplitOpSchrodinger1D(object):
 
         return self.wavefunction
 
-    def get_Ehrenfest(self):
+    def get_ehrenfest(self):
         """
         Calculate observables entering the Ehrenfest theorems
         """
-        if self.isEhrenfest:
+        if self.is_ehrenfest:
             # evaluate the coordinate density
             np.abs(self.wavefunction, out=self.density)
             self.density *= self.density
@@ -210,7 +223,7 @@ class SplitOpSchrodinger1D(object):
             # save the current value of <x>
             self.x_average.append(self.get_x_average(self.density))
 
-            self.p_average_rhs.append(-self.get_p_average_rhs(self.density))
+            self.p_average_rhs.append(-self.get_p_average_rhs(self.density, self.t))
 
             # save the potential energy
             self.hamiltonian_average.append(self.get_v_average(self.density, self.t))
@@ -224,7 +237,7 @@ class SplitOpSchrodinger1D(object):
             # normalize
             self.density /= self.density.sum()
 
-            # save the current value of <P>
+            # save the current value of <p>
             self.p_average.append(self.get_p_average(self.density))
 
             self.x_average_rhs.append(self.get_x_average_rhs(self.density, self.t))

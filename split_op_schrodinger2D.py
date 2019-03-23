@@ -1,148 +1,191 @@
 import numpy as np
-import numexpr as ne
 from scipy import fftpack # Tools for fourier transform
 from scipy import linalg # Linear algebra for dense matrix
-from types import MethodType, FunctionType
-import warnings
+from types import FunctionType
+from numba import njit
 
 
-class SplitOpSchrodinger2D:
+class SplitOpSchrodinger2D(object):
     """
     The second-order split-operator propagator of the 2D Schrodinger equation in the coordinate representation
     with the time-dependent Hamiltonian H = K(P1, P2, t) + V(X1, X2, t).
     """
-    def __init__(self, **kwargs):
+    def __init__(self, x1_grid_dim, x2_grid_dim, x1_amplitude, x2_amplitude, v, k, dt, diff_k_p1=None, diff_k_p2=None,
+                 diff_v_x1=None, diff_v_x2=None, t=0., abs_boundary=1., **kwargs):
         """
-        The following parameters must be specified
-            X1_gridDIM, X2_gridDIM - specifying the grid size
-            X1_amplitude, X2_amplitude - maximum value of the coordinates
+        :param x1_grid_dim: the x1 grid size
+        :param x2_grid_dim: the x2 grid size
 
-            V(X1, X2) - potential energy as a string to be evaluated by numexpr
-            diff_V_X1(X1, X2) (optional)
-             and
-            diff_V_X2(X1, X2) (optional) -- the potential energy gradients (as a string to be evaluated by numexpr)
-                                            for the Ehrenfest theorem calculations
+        :param x1_amplitude: the maximum value of the x1 coordinates
+        :param x2_amplitude: the maximum value of the x2 coordinates
 
-            K(P1, P2) - kinetic energy as a string to be evaluated by numexpr
-            diff_K_P1(P1, P2) (optional)
-             and
-            diff_K_P2(P1, P2) (optional) -- the kinetic energy gradient (as a string to be evaluated by numexpr)
-                                            for the Ehrenfest theorem calculations
+        :param v: the potential energy (as a function)
+        :param k: the kinetic energy (as a function)
 
-            dt - time step
-            t (optional) - initial value of time
-            abs_boundary (optional) -- absorbing boundary (as a string to be evaluated by numexpr)
+        :param diff_k_p1: the derivative of the kinetic energy w.r.t. p1 for the Ehrenfest theorem calculations
+        :param diff_k_p2: the derivative of the kinetic energy w.r.t. p2 for the Ehrenfest theorem calculations
+
+        :param diff_v_x1: the derivative of the potential energy w.r.t. x1 for the Ehrenfest theorem calculations
+        :param diff_v_x2: the derivative of the potential energy w.r.t. x2 for the Ehrenfest theorem calculations
+
+        :param t: initial value of time
+        :param dt: time increment
+        :param abs_boundary: absorbing boundary
+        :param kwargs: ignored
         """
 
-        # save all attributes
-        for name, value in kwargs.items():
-            # if the value supplied is a function, then dynamically assign it as a method;
-            if isinstance(value, FunctionType):
-                setattr(self, name, MethodType(value, self))
-            # otherwise bind it as a property
-            else:
-                setattr(self, name, value)
+        # save the parameters
+        self.x1_grid_dim = x1_grid_dim
+        self.x2_grid_dim = x2_grid_dim
+        self.x1_amplitude = x1_amplitude
+        self.x2_amplitude = x2_amplitude
+        self.diff_v_x1 = diff_v_x1
+        self.diff_v_x2 = diff_v_x2
+        self.diff_k_p1 = diff_k_p1
+        self.diff_k_p2 = diff_k_p2
+        self.dt = dt
+        self.t = t
+        self.abs_boundary = abs_boundary
 
-        # Check that all attributes were specified
-        try:
-            # make sure self.X1_gridDIM and self.X2_gridDIM2 has a value of power of 2
-            assert 2 ** int(np.log2(self.X1_gridDIM)) == self.X1_gridDIM and \
-                2 ** int(np.log2(self.X2_gridDIM)) == self.X2_gridDIM, \
-                "A value of the grid sizes (X1_gridDIM and X2_gridDIM) must be a power of 2"
+        assert 2 ** int(np.log2(self.x1_grid_dim)) == self.x1_grid_dim and \
+               2 ** int(np.log2(self.x2_grid_dim)) == self.x2_grid_dim, \
+                "The grid size (x1_grid_dim and x2_grid_dim) must be a power of 2"
 
-        except AttributeError:
-            raise AttributeError("Grid sizes (X1_gridDIM1 and/or X2_gridDIM) was not specified")
-
-        try:
-            self.X1_amplitude
-            self.X2_amplitude
-        except AttributeError:
-            raise AttributeError("Coordinate ranges (X1_amplitude and/or X2_amplitude) was not specified")
-
-        try:
-            self.V
-        except AttributeError:
-            raise AttributeError("Potential energy (V) was not specified")
-
-        try:
-            self.K
-        except AttributeError:
-            raise AttributeError("Momentum dependence (K) was not specified")
-
-        try:
-            self.dt
-        except AttributeError:
-            raise AttributeError("Time-step (dt) was not specified")
-
-        try:
-            self.t
-        except AttributeError:
-            warnings.warn("initial time (t) was not specified, thus it is set to zero.")
-            self.t = 0.
-
-        try:
-            self.abs_boundary
-        except AttributeError:
-            warnings.warn("absorbing boundary (abs_boundary) was not specified, thus it is turned off")
-            self.abs_boundary = 1.
 
         # get coordinate step sizes
-        self.dX1 = 2. * self.X1_amplitude / self.X1_gridDIM
-        self.dX2 = 2. * self.X2_amplitude / self.X2_gridDIM
+        self.dx1 = 2. * self.x1_amplitude / self.x1_grid_dim
+        self.dx2 = 2. * self.x2_amplitude / self.x2_grid_dim
 
         # generate coordinate ranges
-        self.k1 = np.arange(self.X1_gridDIM)[:, np.newaxis]
-        self.k2 = np.arange(self.X2_gridDIM)[np.newaxis, :]
+        k1 = np.arange(self.x1_grid_dim)[:, np.newaxis]
+        k2 =  np.arange(self.x2_grid_dim)[np.newaxis, :]
         # see http://docs.scipy.org/doc/numpy/reference/arrays.indexing.html
         # for explanation of np.newaxis and other array indexing operations
         # also https://docs.scipy.org/doc/numpy/user/basics.broadcasting.html
         # for understanding the broadcasting in array operations
 
-        self.X1 = (self.k1 - self.X1_gridDIM / 2) * self.dX1
-        self.X2 = (self.k2 - self.X2_gridDIM / 2) * self.dX2
+        x1 = self.x1 = (k1 - self.x1_grid_dim / 2) * self.dx1
+        x2 = self.x2 = (k2 - self.x2_grid_dim / 2) * self.dx2
 
         # generate momentum ranges
-        self.P1 = (self.k1 - self.X1_gridDIM / 2) * (np.pi / self.X1_amplitude)
-        self.P2 = (self.k2 - self.X2_gridDIM / 2) * (np.pi / self.X2_amplitude)
+        p1 = self.p1 = (k1 - self.x1_grid_dim / 2) * (np.pi / self.x1_amplitude)
+        p2 = self.p2 = (k2 - self.x2_grid_dim / 2) * (np.pi / self.x2_amplitude)
 
         # allocate the array for wavefunction
-        self.wavefunction = np.zeros((self.X1_gridDIM, self.X2_gridDIM), dtype=np.complex)
+        self.wavefunction = np.zeros((self.x1_grid_dim, self.x2_grid_dim), dtype=np.complex)
 
-        # allocate an axillary array needed for propagation
-        self.expV = np.zeros_like(self.wavefunction)
+        ###################################################################################################
+        #
+        # Codes for efficient evaluation
+        #
+        ####################################################################################################
 
-        # numexpr code to calculate (-)**(k1 + k2) * exp(-0.5j * dt * V)
-        self.code_expV = "({}) * (-1) ** (k1 + k2) * exp(- 0.5j * dt * ({}))".format(self.abs_boundary, self.V)
+        if isinstance(abs_boundary, FunctionType):
+            @njit
+            def expV(wavefunction, t):
+                """
+                function to efficiently evaluate
+                    wavefunction *= (-1) ** (k1 + k2) * exp(-0.5j * dt * v)
+                """
+                wavefunction *= (-1) ** (k1 + k2) * abs_boundary(x1, x2) * np.exp(-0.5j * dt * v(x1, x2, t))
+        else:
+            @njit
+            def expV(wavefunction, t):
+                """
+                function to efficiently evaluate
+                    wavefunction *= (-1) ** k * exp(-0.5j * dt * v)
+                """
+                wavefunction *= (-1) ** (k1 + k2) * abs_boundary * np.exp(-0.5j * dt * v(x1, x2, t))
 
-        # numexpr code to calculate wavefunction * exp(-1j * dt * K)
-        self.code_expK = "wavefunction * exp(-1j * dt * ({}))".format(self.K)
+        self.expV = expV
+
+        @njit
+        def expK(wavefunction, t):
+            """
+            function to efficiently evaluate
+                wavefunction *= exp(-1j * dt * k)
+            """
+            wavefunction *= np.exp(-1j * dt * k(p1, p2, t))
+
+        self.expK = expK
 
         # Check whether the necessary terms are specified to calculate the first-order Ehrenfest theorems
-        try:
-            # numexpr codes to calculate the first-order Ehrenfest theorems
-            self.code_P1_average_RHS = "sum(({}) * density)".format(self.diff_V_X1)
-            self.code_P2_average_RHS = "sum(({}) * density)".format(self.diff_V_X2)
-            self.code_V_average = "sum(({}) * density)".format(self.V)
-            self.code_X1_average = "sum(X1 * density)"
-            self.code_X2_average = "sum(X2 * density)"
+        if diff_k_p1 and diff_k_p2 and diff_v_x1 and diff_v_x2:
 
-            self.code_X1_average_RHS = "sum(({}) * density)".format(self.diff_K_P1)
-            self.code_X2_average_RHS = "sum(({}) * density)".format(self.diff_K_P2)
-            self.code_K_average = "sum(({}) * density)".format(self.K)
-            self.code_P1_average = "sum(P1 * density)"
-            self.code_P2_average = "sum(P2 * density)"
+            # Get codes for efficiently calculating the Ehrenfest relations
+            @njit
+            def get_p1_average_rhs(density, t):
+                return np.sum(density * diff_v_x1(x1, x2, t))
 
-            # Lists where the expectation values of X and P
-            self.X1_average = []
-            self.P1_average = []
-            self.X2_average = []
-            self.P2_average = []
+            self.get_p1_average_rhs = get_p1_average_rhs
 
-            # Lists where the right hand sides of the Ehrenfest theorems for X and P
-            self.X1_average_RHS = []
-            self.P1_average_RHS = []
-            self.X2_average_RHS = []
-            self.P2_average_RHS = []
+            @njit
+            def get_p2_average_rhs(density, t):
+                return np.sum(density * diff_v_x2(x1, x2, t))
+
+            self.get_p2_average_rhs = get_p2_average_rhs
+
+            @njit
+            def get_v_average(density, t):
+                return np.sum(v(x1, x2, t) * density)
+
+            self.get_v_average = get_v_average
+
+            @njit
+            def get_x1_average(density):
+                return np.sum(x1 * density)
+
+            self.get_x1_average = get_x1_average
+
+            @njit
+            def get_x2_average(density):
+                return np.sum(x2 * density)
+
+            self.get_x2_average = get_x2_average
+
+            @njit
+            def get_x1_average_rhs(density, t):
+                return np.sum(diff_k_p1(p1, p2, t) * density)
+
+            self.get_x1_average_rhs = get_x1_average_rhs
+
+            @njit
+            def get_x2_average_rhs(density, t):
+                return np.sum(diff_k_p2(p1, p2, t) * density)
+
+            self.get_x2_average_rhs = get_x2_average_rhs
+
+            @njit
+            def get_k_average(density, t):
+                return np.sum(k(p1, p2, t) * density)
+
+            self.get_k_average = get_k_average
+
+            @njit
+            def get_p1_average(density):
+                return np.sum(p1 * density)
+
+            self.get_p1_average = get_p1_average
+
+            @njit
+            def get_p2_average(density):
+                return np.sum(p2 * density)
+
+            self.get_p2_average = get_p2_average
+
+            # Lists where the expectation values of x's and p's
+            self.x1_average = []
+            self.x2_average = []
+
+            self.p1_average = []
+            self.p2_average = []
+
+            # Lists where the right hand sides of the Ehrenfest theorems for x's and p's
+            self.x1_average_rhs = []
+            self.x2_average_rhs = []
+
+            self.p1_average_rhs = []
+            self.p2_average_rhs = []
 
             # List where the expectation value of the Hamiltonian will be calculated
             self.hamiltonian_average = []
@@ -150,15 +193,14 @@ class SplitOpSchrodinger2D:
             # Allocate array for storing coordinate or momentum density of the wavefunction
             self.density = np.zeros(self.wavefunction.shape, dtype=np.float)
 
-            # Allocate a copy of the wavefunction for storing the wavefunction in the momentum representation
-            self.wavefunction_p = np.zeros_like(self.wavefunction)
+            # sequence of alternating signs for getting the wavefunction in the momentum representation
+            self.minus = (-1) ** (k1 + k2)
 
             # Flag requesting tha the Ehrenfest theorem calculations
-            self.isEhrenfest = True
-        except AttributeError:
-            # Since self.diff_V and self.diff_K are not specified,
-            # the Ehrenfest theorem will not be calculated
-            self.isEhrenfest = False
+            self.is_ehrenfest = True
+        else:
+            # Since diff_v and diff_k are not specified, we are not going to evaluate the Ehrenfest relations
+            self.is_ehrenfest = False
 
     def propagate(self, time_steps=1):
         """
@@ -168,104 +210,93 @@ class SplitOpSchrodinger2D:
         """
 
         # pre-compute the sqrt of the volume element
-        sqrtdX1dX2 = np.sqrt(self.dX1 * self.dX2)
+        sqrt_dx1dx2 = np.sqrt(self.dx1 * self.dx2)
 
         for _ in range(time_steps):
             # make a half step in time
             self.t += 0.5 * self.dt
 
-            # efficiently calculate expV
-            ne.evaluate(self.code_expV, local_dict=vars(self), out=self.expV)
-            self.wavefunction *= self.expV
+            # efficiently calculate
+            #   wavefunction *= expV
+            self.expV(self.wavefunction, self.t)
 
             # going to the momentum representation
             self.wavefunction = fftpack.fft2(self.wavefunction, overwrite_x=True)
-            ne.evaluate(self.code_expK, local_dict=vars(self), out=self.wavefunction)
+
+            # efficiently evaluate
+            #   wavefunction *= exp(-1j * dt * k)
+            self.expK(self.wavefunction, self.t)
 
             # going back to the coordinate representation
             self.wavefunction = fftpack.ifft2(self.wavefunction, overwrite_x=True)
-            self.wavefunction *= self.expV
+
+            # efficiently calculate
+            #   wavefunction *= expV
+            self.expV(self.wavefunction, self.t)
 
             # normalize
             # the following line is equivalent to
             # self.wavefunction /= np.sqrt(np.sum(np.abs(self.wavefunction)**2) * self.dX1 * self.dX2)
             # or
-            # self.wavefunction /= linalg.norm(self.wavefunction.reshape(-1)) * np.sqrt(self.dX1 * self.dX2)
-            self.wavefunction /= np.sqrt(
-                ne.evaluate("sum(abs(wavefunction) ** 2)", local_dict=vars(self)) * self.dX1 * self.dX2
-            )
+            self.wavefunction /= linalg.norm(self.wavefunction.reshape(-1)) * sqrt_dx1dx2
 
             # make a half step in time
             self.t += 0.5 * self.dt
 
             # calculate the Ehrenfest theorems
-            self.get_Ehrenfest()
+            self.get_ehrenfest()
 
         return self.wavefunction
 
-    def get_Ehrenfest(self):
+    def get_ehrenfest(self):
         """
         Calculate observables entering the Ehrenfest theorems at time (t)
         """
-        if self.isEhrenfest:
+        if self.is_ehrenfest:
+
             # evaluate the coordinate density
-            ne.evaluate("real(abs(wavefunction)) ** 2", local_dict=vars(self), out=self.density)
+            np.abs(self.wavefunction, out=self.density)
+            self.density *= self.density
             # normalize
             self.density /= self.density.sum()
 
-            # save the current value of coordinate-dependent observables
-            self.X1_average.append(
-                ne.evaluate(self.code_X1_average, local_dict=vars(self))
-            )
-            self.X2_average.append(
-                ne.evaluate(self.code_X2_average, local_dict=vars(self))
-            )
-            self.P1_average_RHS.append(
-                -ne.evaluate(self.code_P1_average_RHS, local_dict=vars(self))
-            )
-            self.P2_average_RHS.append(
-                -ne.evaluate(self.code_P2_average_RHS, local_dict=vars(self))
-            )
+            # save the current values of <x1> and <x2>
+            self.x1_average.append(self.get_x1_average(self.density))
+            self.x2_average.append(self.get_x2_average(self.density))
+
+            self.p1_average_rhs.append(-self.get_p1_average_rhs(self.density, self.t))
+            self.p2_average_rhs.append(-self.get_p2_average_rhs(self.density, self.t))
 
             # save the potential energy
-            self.hamiltonian_average.append(
-                ne.evaluate(self.code_V_average, local_dict=vars(self))
-            )
+            self.hamiltonian_average.append(self.get_v_average(self.density, self.t))
 
             # calculate density in the momentum representation
-            ne.evaluate("(-1) ** (k1 + k2) * wavefunction", local_dict=vars(self), out=self.wavefunction_p)
-            self.wavefunction_p = fftpack.fft2(self.wavefunction_p, overwrite_x=True)
-            ne.evaluate("real(abs(wavefunction_p)) ** 2", local_dict=vars(self), out=self.density)
+            wavefunction_p = fftpack.fft2(self.minus * self.wavefunction, overwrite_x=True)
+
+            # get the density in the momentum space
+            np.abs(wavefunction_p, out=self.density)
+            self.density *= self.density
             # normalize
             self.density /= self.density.sum()
 
-            # save the current value of momentum-dependent observables
-            self.P1_average.append(
-                ne.evaluate(self.code_P1_average, local_dict=vars(self))
-            )
-            self.P2_average.append(
-                ne.evaluate(self.code_P2_average, local_dict=vars(self))
-            )
-            self.X1_average_RHS.append(
-                ne.evaluate(self.code_X1_average_RHS, local_dict=vars(self))
-            )
-            self.X2_average_RHS.append(
-                ne.evaluate(self.code_X2_average_RHS, local_dict=vars(self))
-            )
+            # save the current values of <p1> and <p2>
+            self.p1_average.append(self.get_p1_average(self.density))
+            self.p2_average.append(self.get_p2_average(self.density))
+
+            self.x1_average_rhs.append(self.get_x1_average_rhs(self.density, self.t))
+            self.x2_average_rhs.append(self.get_x2_average_rhs(self.density, self.t))
 
             # add the kinetic energy to get the hamiltonian
-            self.hamiltonian_average[-1] += \
-                ne.evaluate(self.code_K_average, local_dict=vars(self))
+            self.hamiltonian_average[-1] += self.get_k_average(self.density, self.t)
 
     def set_wavefunction(self, wavefunc):
         """
         Set the initial wave function
-        :param wavefunc: 2D numpy array or sting containing the wave function
+        :param wavefunc: 2D numpy array or a function specifying the wave function
         :return: self
         """
-        if isinstance(wavefunc, str):
-            # wavefunction is supplied as a string
-            ne.evaluate("({}) + 0j".format(wavefunc), local_dict=vars(self), out=self.wavefunction)
+        if isinstance(wavefunc, FunctionType):
+            self.wavefunction[:] = wavefunc(self.x1, self.x2)
 
         elif isinstance(wavefunc, np.ndarray):
             # wavefunction is supplied as an array
@@ -281,216 +312,6 @@ class SplitOpSchrodinger2D:
             raise ValueError("wavefunc must be either string or numpy.array")
 
         # normalize
-        self.wavefunction /= np.sqrt(
-            ne.evaluate("sum(abs(wavefunction) ** 2)", local_dict=vars(self)) * self.dX1 * self.dX2
-        )
+        self.wavefunction /= linalg.norm(self.wavefunction.reshape(-1)) * np.sqrt(self.dx1 * self.dx2)
 
         return self
-
-##############################################################################
-#
-#   Run some examples
-#
-##############################################################################
-
-if __name__ == '__main__':
-
-    # load tools for creating animation
-    import matplotlib.pyplot as plt
-    from matplotlib.animation import FuncAnimation, writers
-
-    # Use the documentation string for the developed class
-    print(SplitOpSchrodinger2D.__doc__)
-
-    class VisualizeDynamics2D:
-        """
-        Class to visualize the wave function dynamics in 2D.
-        """
-        def __init__(self, fig):
-            """
-            Initialize all propagators and frame
-            :param fig: matplotlib figure object
-            """
-            #  Initialize systems
-            self.set_quantum_sys()
-
-            #################################################################
-            #
-            # Initialize plotting facility
-            #
-            #################################################################
-
-            self.fig = fig
-
-            ax = fig.add_subplot(111)
-
-            ax.set_title('Wavefunction density, $| \\Psi(x_1, x_2, t) |^2$')
-            extent=[
-                self.quant_sys.X2.min(),
-                self.quant_sys.X2.max(),
-                self.quant_sys.X1.min(),
-                self.quant_sys.X1.max()
-            ]
-            self.img = ax.imshow([[]], extent=extent, origin='lower')
-
-            self.fig.colorbar(self.img)
-
-            ax.set_xlabel('$x_2$ (a.u.)')
-            ax.set_ylabel('$x_1$ (a.u.)')
-
-        def set_quantum_sys(self):
-            """
-            Initialize quantum propagator
-            :param self:
-            :return:
-            """
-            self.quant_sys = SplitOpSchrodinger2D(
-                t=0.,
-                dt=0.005,
-                X1_gridDIM=256,
-                X1_amplitude=5.,
-                X2_gridDIM=256,
-                X2_amplitude=5.,
-
-                # kinetic energy part of the hamiltonian
-                K="0.5 * (P1 ** 2 + P2 ** 2)",
-
-                # these functions are used for evaluating the Ehrenfest theorems
-                diff_K_P1="P1",
-                diff_K_P2="P2",
-
-                # potential energy part of the hamiltonian
-                V="0.5 * 3 ** 2 * (X1 ** 2 + X2 ** 2)",
-
-                # these functions are used for evaluating the Ehrenfest theorems
-                diff_V_X1="3 ** 2 * X1",
-                diff_V_X2="3 ** 2 * X2",
-            )
-
-            # set randomised initial condition
-            self.quant_sys.set_wavefunction(
-                """exp(
-                    -{alpha1} * (X1 + {X10}) ** 2 -{alpha2} * (X2 + {X20}) ** 2 -1j * ({K1} * X1 + {K2} * X2) 
-                )""".format(
-                    alpha1=np.random.uniform(0.5, 3.),
-                    X10=np.random.uniform(-2., 2.),
-                    alpha2=np.random.uniform(0.5, 3.),
-                    X20=np.random.uniform(-2., 2.),
-                    K1=np.random.uniform(-2., 2.),
-                    K2=np.random.uniform(-2., 2.),
-                )
-            )
-
-        def __call__(self, frame_num):
-            """
-            Draw a new frame
-            :param frame_num: current frame number
-            :return: image objects
-            """
-            # propagate and set the density
-            self.img.set_array(
-                np.abs(self.quant_sys.propagate(20))**2
-            )
-            return self.img,
-
-    fig = plt.gcf()
-    visualizer = VisualizeDynamics2D(fig)
-    animation = FuncAnimation(
-        fig, visualizer, frames=np.arange(100), repeat=True, blit=True
-    )
-
-    plt.show()
-
-    # If you want to make a movie, comment "plt.show()" out and uncomment the lines bellow
-
-    # Set up formatting for the movie files
-    #   writer = writers['mencoder'](fps=10, metadata=dict(artist='a good student'), bitrate=-1)
-
-    # Save animation into the file
-    #   animation.save('2D_Schrodinger.mp4', writer=writer)
-
-    # extract the reference to quantum system
-    quant_sys = visualizer.quant_sys
-
-    # Analyze how well the energy was preserved
-    h = np.array(quant_sys.hamiltonian_average)
-    print(
-        "\nHamiltonian is preserved within the accuracy of {:.2e} percent".format(
-            100. * (1. - h.min()/h.max())
-        )
-    )
-
-    #################################################################
-    #
-    # Plot the Ehrenfest theorems after the animation is over
-    #
-    #################################################################
-
-    # generate time step grid
-    dt = quant_sys.dt
-    times = np.arange(dt, dt + dt*len(quant_sys.X1_average), dt)
-
-    plt.subplot(121)
-    plt.title("The first Ehrenfest theorem verification")
-
-    plt.plot(
-        times,
-        np.gradient(quant_sys.X1_average, dt),
-        'r-',
-        label='$d\\langle \\hat{x}_1 \\rangle/dt$'
-    )
-    plt.plot(
-        times,
-        quant_sys.X1_average_RHS,
-        'b--', label='$\\langle \\hat{p}_1 \\rangle$'
-    )
-
-    plt.plot(
-        times,
-        np.gradient(quant_sys.X2_average, dt),
-        'g-',
-        label='$d\\langle \\hat{x}_2 \\rangle/dt$'
-    )
-    plt.plot(
-        times,
-        quant_sys.X2_average_RHS,
-        'k--',
-        label='$\\langle \\hat{p}_2 \\rangle$'
-    )
-
-    plt.legend()
-    plt.xlabel('time $t$ (a.u.)')
-
-    plt.subplot(122)
-    plt.title("The second Ehrenfest theorem verification")
-
-    plt.plot(
-        times,
-        np.gradient(quant_sys.P1_average, dt),
-        'r-',
-        label='$d\\langle \\hat{p}_1 \\rangle/dt$'
-    )
-    plt.plot(
-        times,
-        quant_sys.P1_average_RHS,
-        'b--',
-        label='$\\langle -\\partial\\hat{V}/\\partial\\hat{x}_1 \\rangle$'
-    )
-
-    plt.plot(
-        times,
-        np.gradient(quant_sys.P2_average, dt),
-        'g-',
-        label='$d\\langle \\hat{p}_2 \\rangle/dt$'
-    )
-    plt.plot(
-        times,
-        quant_sys.P2_average_RHS,
-        'k--',
-        label='$\\langle -\\partial\\hat{V}/\\partial\\hat{x}_2 \\rangle$'
-    )
-
-    plt.legend()
-    plt.xlabel('time $t$ (a.u.)')
-
-    plt.show()

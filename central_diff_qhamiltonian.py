@@ -21,11 +21,13 @@ class CentralDiffQHamiltonian:
         self.x_amplitude = x_amplitude
         self.v = v
 
-        # generate coordinate range
-        self.x = np.linspace(-self.x_amplitude, self.x_amplitude, self.x_grid_dim)
+        # get coordinate step size
+        self.dx = 2. * self.x_amplitude / self.x_grid_dim
 
-        # save the coordinate step size
-        self.dx = self.x[1] - self.x[0]
+        # generate coordinate range
+        self.x = (np.arange(self.x_grid_dim) - self.x_grid_dim / 2) * self.dx
+        # The same as
+        # self.x = np.linspace(-self.x_amplitude, self.x_amplitude - self.dx , self.x_grid_dim)
 
         # Construct the kinetic energy part as sparse matrix from diagonal
         self.hamiltonian = diags([1., -2., 1.], [-1, 0, 1], shape=(self.x_grid_dim, self.x_grid_dim))
