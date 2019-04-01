@@ -1,4 +1,4 @@
-from split_op_schrodinger1D import SplitOpSchrodinger1D, fftpack, np, ne, linalg
+from split_op_schrodinger1D import SplitOpSchrodinger1D, fftpack, np, linalg
 
 # We will use the inheritance in the object orienting programing (see, e.g.,
 # https://en.wikipedia.org/wiki/Inheritance_%28object-oriented_programming%29 and
@@ -20,8 +20,13 @@ class ImgTimePropagation(SplitOpSchrodinger1D):
         """
         # since there is no time dependence (self.t) during the imaginary time propagation
         # pre-calculate imaginary time exponents of the potential and kinetic energy
-        img_expV = ne.evaluate("(-1) ** k * exp(-0.5 * dt * ({}))".format(self.V), local_dict=vars(self))
-        img_expK = ne.evaluate("exp(-dt * ({}))".format(self.K), local_dict=vars(self))
+        # img_expV = ne.evaluate("(-1) ** k * exp(-0.5 * dt * ({}))".format(self.V), local_dict=vars(self))
+
+        img_exp_v = (-1) ** np.arange(self.wavefunction.size) * np.exp(-0.5 * self.dt * self.v(self.x, self.t))
+
+        # img_expK = ne.evaluate("exp(-dt * ({}))".format(self.K), local_dict=vars(self))
+        img_exp_k = np.exp(-self.dt * self.k(self.p, self.t))
+
 
         # initialize the list where the stationary states will be saved
         self.stationary_states = []
@@ -34,10 +39,7 @@ class ImgTimePropagation(SplitOpSchrodinger1D):
             # allocate and initialize the wavefunction depending on the parity.
             # Note that you do not have to be fancy and can choose any initial guess (even random).
             # the more reasonable initial guess, the faster the convergence.
-            wavefunction = ne.evaluate(
-                "exp(-X ** 2)" if even else "X * exp(-X ** 2)",
-                local_dict=vars(self),
-            )
+            wavefunction = (np.exp(-self.x ** 2) if even else self.x * np.exp(-self.x ** 2))
             even = not even
 
             for _ in range(nsteps):
@@ -46,15 +48,15 @@ class ImgTimePropagation(SplitOpSchrodinger1D):
                 #   Make an imaginary time step
                 #
                 #################################################################################
-                wavefunction *= img_expV
+                wavefunction *= img_exp_v
 
                 # going to the momentum representation
                 wavefunction = fftpack.fft(wavefunction, overwrite_x=True)
-                wavefunction *= img_expK
+                wavefunction *= img_exp_k
 
                 # going back to the coordinate representation
                 wavefunction = fftpack.ifft(wavefunction, overwrite_x=True)
-                wavefunction *= img_expV
+                wavefunction *= img_exp_v
 
                 #################################################################################
                 #
@@ -63,161 +65,20 @@ class ImgTimePropagation(SplitOpSchrodinger1D):
                 #################################################################################
 
                 # normalize
-                wavefunction /= linalg.norm(wavefunction) * np.sqrt(self.dX)
+                wavefunction /= linalg.norm(wavefunction) * np.sqrt(self.dx)
 
                 # calculate the projections
-                projs = [np.vdot(psi, wavefunction) * self.dX for psi in self.stationary_states]
+                projs = [np.vdot(psi, wavefunction) * self.dx for psi in self.stationary_states]
 
                 # project out the stationary states
                 for psi, proj in zip(self.stationary_states, projs):
-                    ne.evaluate("wavefunction - proj * psi", out=wavefunction)
+                    wavefunction -= proj * psi
+                    # ne.evaluate("wavefunction - proj * psi", out=wavefunction)
 
                 # normalize
-                wavefunction /= linalg.norm(wavefunction) * np.sqrt(self.dX)
+                wavefunction /= linalg.norm(wavefunction) * np.sqrt(self.dx)
 
             # save obtained approximation to the stationary state
             self.stationary_states.append(wavefunction)
 
         return self
-
-##############################################################################
-#
-#   Run some examples
-#
-##############################################################################
-
-if __name__ == '__main__':
-
-    # load tools for creating animation
-    import matplotlib.pyplot as plt
-
-    # specify parameters separately
-    atom_params = dict(
-        X_gridDIM=1024,
-        X_amplitude=10.,
-        dt=0.05,
-        K="0.5 * P ** 2",
-        V="-1. / sqrt(X ** 2 + 1.37)",
-    )
-
-    # construct the propagator
-    atom_sys = ImgTimePropagation(**atom_params)
-
-    # find the ground and first excited states via the imaginary time method
-    atom_sys.get_stationary_states(4)
-
-    # get "exact" eigenstates by diagonalizing the MUB hamiltonian
-    from mub_qhamiltonian import MUBQHamiltonian
-    atom_mub = MUBQHamiltonian(**atom_params)
-
-    plt.subplot(221)
-    plt.title("Ground state calculation for argon within the single active electron approximation")
-
-    # set the ground state (obtained via the imaginary time propagation) as the initial condition
-    atom_sys.set_wavefunction(atom_sys.stationary_states[0])
-
-    plt.semilogy(
-        atom_sys.X,
-        atom_sys.wavefunction.real,
-        'r-',
-        label='state via img-time'
-    )
-    plt.semilogy(
-        atom_sys.X,
-        np.abs(atom_sys.propagate(10000)),
-        'b--',
-        label='state after propagation'
-    )
-    plt.semilogy(
-        atom_sys.X,
-        atom_mub.get_eigenstate(0).real,
-        'g-.',
-        label='state via MUB'
-    )
-    plt.xlabel("$x$ (a.u.)")
-    plt.legend(loc='lower center')
-
-    plt.subplot(222)
-    plt.title("First exited state calculation of argon")
-
-    # set the first excited state (obtained via the imaginary time propagation) as the initial condition
-    atom_sys.set_wavefunction(atom_sys.stationary_states[1])
-
-    plt.semilogy(
-        atom_sys.X,
-        np.abs(atom_sys.wavefunction),
-        'r-',
-        label='state via img-time'
-    )
-    plt.semilogy(
-        atom_sys.X,
-        np.abs(atom_sys.propagate(10000)),
-        'b--',
-        label='state after propagation'
-    )
-    plt.semilogy(
-        atom_sys.X,
-        np.abs(atom_mub.get_eigenstate(1)),
-        'g-.',
-        label='state via MUB'
-    )
-    plt.ylim([1e-6, 1e0])
-    plt.xlabel("$x$ (a.u.)")
-    plt.legend(loc='lower center')
-
-    plt.subplot(223)
-    plt.title("Second exited state calculation of argon")
-
-    # set the second excited state (obtained via the imaginary time propagation) as the initial condition
-    atom_sys.set_wavefunction(atom_sys.stationary_states[2])
-
-    plt.semilogy(
-        atom_sys.X,
-        np.abs(atom_sys.wavefunction),
-        'r-', label='state via img-time'
-    )
-    plt.semilogy(
-        atom_sys.X,
-        np.abs(atom_sys.propagate(10000)),
-        'b--',
-        label='state after propagation'
-    )
-    plt.semilogy(
-        atom_sys.X,
-        np.abs(atom_mub.get_eigenstate(2)),
-        'g-.',
-        label='state via MUB'
-    )
-    plt.ylim([1e-6, 1e0])
-    plt.xlabel("$x$ (a.u.)")
-    plt.legend(loc='lower center')
-
-    plt.subplot(224)
-    plt.title("Third exited state calculation of argon")
-
-    # set the third excited state (obtained via the imaginary time propagation) as the initial condition
-    atom_sys.set_wavefunction(atom_sys.stationary_states[3])
-
-    plt.semilogy(
-        atom_sys.X,
-        np.abs(atom_sys.wavefunction),
-        'r-',
-        label='state via img-time'
-    )
-    plt.semilogy(
-        atom_sys.X,
-        np.abs(atom_sys.propagate(10000)),
-        'b--',
-        label='state after propagation'
-    )
-    plt.semilogy(
-        atom_sys.X,
-        np.abs(atom_mub.get_eigenstate(3)),
-        'g-.',
-        label='state via MUB'
-    )
-    plt.ylim([1e-6, 1e0])
-    plt.xlabel("$x$ (a.u.)")
-    plt.legend(loc='lower center')
-
-    plt.show()
