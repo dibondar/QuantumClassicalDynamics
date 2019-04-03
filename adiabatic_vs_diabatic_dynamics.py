@@ -7,6 +7,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation # tools for creating animation
 from imag_time_propagation import ImgTimePropagation
+from numba import njit
 
 
 class DynamicVisualized:
@@ -25,23 +26,41 @@ class DynamicVisualized:
         #################################################################
 
         # common quantum system parameters
+        @njit
+        def k(p, t=0.):
+            """
+            Non-relativistic kinetic energy
+            """
+            return 0.5 * p ** 2
+
         self.qsys_params = dict(
             t=-7.,
             dt=0.005,
-            X_gridDIM=1024,
-            X_amplitude=10.,
-            K="0.5 * P ** 2",
+            x_grid_dim=1024,
+            x_amplitude=10.,
+            k=k,
         )
+
+        @njit
+        def v1(x, t=-7.):
+            """
+            Slowly changing potential energy
+            """
+            return 0.01 * (1. - 0.95 / (1. + np.exp(-0.2 * t))) * x ** 4
 
         # initialize adiabatic system (i.e, with slow time dependence)
         self.adiabatic_sys = ImgTimePropagation(
-                V="0.01 * (1. - 0.95 / (1. + exp(-0.2 * t))) * X ** 4",
+                v=v1,
                 **self.qsys_params
         )
 
+        @njit
+        def v2(x, t=-7.):
+            return 0.01 * (1. - 0.95 / (1. + np.exp(-5. * t))) * x ** 4
+
         # initialize diabatic system (i.e, with fast time dependence)
         self.diabatic_sys = ImgTimePropagation(
-                V="0.01 * (1. - 0.95 / (1. + exp(-5. * t))) * X ** 4",
+                v=v2,
                 **self.qsys_params
         )
 
@@ -54,8 +73,8 @@ class DynamicVisualized:
         self.fig = fig
 
         # plotting axis limits
-        xmin = self.diabatic_sys.X.min()
-        xmax = self.diabatic_sys.X.max()
+        xmin = self.diabatic_sys.x.min()
+        xmax = self.diabatic_sys.x.max()
         ymin = 1e-10
         ymax = 1e2
 
@@ -100,12 +119,12 @@ class DynamicVisualized:
         d_ground_state = self.diabatic_sys.get_stationary_states(1, nsteps=5000).stationary_states[0]
 
         self.ad_instant_eigns_line.set_data(
-            self.adiabatic_sys.X,
+            self.adiabatic_sys.x,
             np.abs(ad_ground_state) ** 2
         )
 
         self.d_instant_eigns_line.set_data(
-            self.diabatic_sys.X,
+            self.diabatic_sys.x,
             np.abs(d_ground_state) ** 2
         )
 
@@ -120,11 +139,11 @@ class DynamicVisualized:
 
         # update plots
         self.adiabatic_line.set_data(
-            self.adiabatic_sys.X,
+            self.adiabatic_sys.x,
             np.abs(self.adiabatic_sys.wavefunction)**2
         )
         self.diabatic_line.set_data(
-            self.diabatic_sys.X,
+            self.diabatic_sys.x,
             np.abs(self.diabatic_sys.wavefunction)**2
         )
 
