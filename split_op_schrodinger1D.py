@@ -2,6 +2,7 @@ import numpy as np
 from scipy import fftpack # Tools for fourier transform
 from scipy import linalg # Linear algebra for dense matrix
 from numba import njit
+from numba.targets.registry import CPUDispatcher
 from types import FunctionType
 
 
@@ -11,7 +12,7 @@ class SplitOpSchrodinger1D(object):
     in the coordinate representation
     with the time-dependent Hamiltonian H = K(p, t) + V(x, t).
     """
-    def __init__(self, x_grid_dim, x_amplitude, v, k, dt, diff_k=None, diff_v=None, t=0, abs_boundary=1., **kwargs):
+    def __init__(self, *, x_grid_dim, x_amplitude, v, k, dt, diff_k=None, diff_v=None, t=0, abs_boundary=1., **kwargs):
         """
         :param x_grid_dim: the grid size
         :param x_amplitude: the maximum value of the coordinates
@@ -61,7 +62,7 @@ class SplitOpSchrodinger1D(object):
         #
         ####################################################################################################
 
-        if isinstance(abs_boundary, FunctionType):
+        if isinstance(abs_boundary, CPUDispatcher):
             @njit
             def expV(wavefunction, t):
                 """
@@ -69,7 +70,8 @@ class SplitOpSchrodinger1D(object):
                     wavefunction *= (-1) ** k * exp(-0.5j * dt * v)
                 """
                 wavefunction *= (-1) ** np.arange(wavefunction.size) * abs_boundary(x) * np.exp(-0.5j * dt * v(x, t))
-        else:
+
+        elif isinstance(abs_boundary, (float, int)):
             @njit
             def expV(wavefunction, t):
                 """
@@ -77,6 +79,9 @@ class SplitOpSchrodinger1D(object):
                     wavefunction *= (-1) ** k * exp(-0.5j * dt * v)
                 """
                 wavefunction *= (-1) ** np.arange(wavefunction.size) * abs_boundary * np.exp(-0.5j * dt * v(x, t))
+                
+        else:
+            raise ValueError("abs_boundary must be either a numba function or a numerical constant")
 
         self.expV = expV
 
@@ -251,7 +256,7 @@ class SplitOpSchrodinger1D(object):
         :param wavefunc: 1D numpy array or function specifying the wave function
         :return: self
         """
-        if isinstance(wavefunc, FunctionType):
+        if isinstance(wavefunc, (CPUDispatcher, FunctionType)):
             self.wavefunction[:] = wavefunc(self.x)
 
         elif isinstance(wavefunc, np.ndarray):
@@ -265,7 +270,7 @@ class SplitOpSchrodinger1D(object):
             np.copyto(self.wavefunction, wavefunc.astype(np.complex))
 
         else:
-            raise ValueError("wavefunc must be either string or numpy.array")
+            raise ValueError("wavefunc must be either function or numpy.array")
 
         # normalize
         self.wavefunction /= linalg.norm(self.wavefunction) * np.sqrt(self.dx)

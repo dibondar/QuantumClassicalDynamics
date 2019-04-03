@@ -1,9 +1,9 @@
 import numpy as np
 from scipy import fftpack # Tools for fourier transform
 from scipy import linalg # Linear algebra for dense matrix
-from types import FunctionType
 from numba import njit
-
+from numba.targets.registry import CPUDispatcher
+from types import FunctionType
 
 class SplitOpSchrodinger2D(object):
     """
@@ -80,7 +80,7 @@ class SplitOpSchrodinger2D(object):
         #
         ####################################################################################################
 
-        if isinstance(abs_boundary, FunctionType):
+        if isinstance(abs_boundary, CPUDispatcher):
             @njit
             def expV(wavefunction, t):
                 """
@@ -88,7 +88,8 @@ class SplitOpSchrodinger2D(object):
                     wavefunction *= (-1) ** (k1 + k2) * exp(-0.5j * dt * v)
                 """
                 wavefunction *= (-1) ** (k1 + k2) * abs_boundary(x1, x2) * np.exp(-0.5j * dt * v(x1, x2, t))
-        else:
+
+        elif isinstance(abs_boundary, (float, int)):
             @njit
             def expV(wavefunction, t):
                 """
@@ -96,6 +97,9 @@ class SplitOpSchrodinger2D(object):
                     wavefunction *= (-1) ** k * exp(-0.5j * dt * v)
                 """
                 wavefunction *= (-1) ** (k1 + k2) * abs_boundary * np.exp(-0.5j * dt * v(x1, x2, t))
+
+        else:
+            raise ValueError("abs_boundary must be either a numba function or a numerical constant")
 
         self.expV = expV
 
@@ -295,7 +299,7 @@ class SplitOpSchrodinger2D(object):
         :param wavefunc: 2D numpy array or a function specifying the wave function
         :return: self
         """
-        if isinstance(wavefunc, FunctionType):
+        if isinstance(wavefunc, (CPUDispatcher, FunctionType)):
             self.wavefunction[:] = wavefunc(self.x1, self.x2)
 
         elif isinstance(wavefunc, np.ndarray):
