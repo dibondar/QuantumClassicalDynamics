@@ -94,7 +94,11 @@ plt.subplot(121)
 plt.title("Original Schrodinger cat")
 
 # get the state
-schrodinger_cat = np.exp(-(x + 3) ** 2 -5j * x) + np.exp(-(x - 3) ** 2 +5j * x)
+#psi_1 = np.exp(-(x) ** 2 +10j * x)
+psi_1 = np.exp(-(x - 4) ** 2)
+psi_2 = np.exp(-(x + 4) ** 2)
+
+schrodinger_cat = psi_1 + psi_2
 
 # get the Wigner function
 W = rho2wigner(schrodinger_cat * schrodinger_cat.conj().T)
@@ -128,8 +132,7 @@ rho_averaged = np.zeros_like(W)
 # loop over noise
 for index in range(1000):
 
-    psi = schrodinger_cat + np.random.normal(loc=0, scale=1., size=schrodinger_cat.shape)
-    #psi = schrodinger_cat + np.random.normal(loc=0, scale=0.8, size=schrodinger_cat.shape)
+    psi = psi_1 + psi_2 * np.exp(+1j * np.random.normal(loc=0, scale=2.8))
     psi /= np.linalg.norm(psi)
 
     # form the density matrix out of the wavefunctions
@@ -140,10 +143,9 @@ for index in range(1000):
     rho /= (index + 1)
     rho_averaged += rho
 
+# print(rho_averaged.dot(rho_averaged).trace())
 
 plt.subplot(122)
-
-print(rho_averaged.dot(rho_averaged).trace())
 
 plt.imshow(rho2wigner(rho_averaged).real, **imag_params)
 plt.colorbar()
