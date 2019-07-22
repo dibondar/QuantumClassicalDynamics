@@ -54,7 +54,7 @@ def rho2wigner(rho):
     :return: numpy.array
     """
     # just change the name
-    W = rho
+    W = rho.copy()
 
     W *= minus_n_k
 
@@ -89,36 +89,13 @@ def rho2wigner(rho):
 #
 ########################################################################################################################
 
+psi_1 = np.exp(-(x + 4) ** 2)
+psi_2 = np.exp(-(x - 2) ** 2)
 
-plt.subplot(121)
-plt.title("Original Schrodinger cat")
-
-# get the state
-#psi_1 = np.exp(-(x) ** 2 +10j * x)
-psi_1 = np.exp(-(x - 4) ** 2)
-psi_2 = np.exp(-(x + 4) ** 2)
-
-schrodinger_cat = psi_1 + psi_2
-
-# get the Wigner function
-W = rho2wigner(schrodinger_cat * schrodinger_cat.conj().T)
-
-extent = [x_wigner.min(), x_wigner.max(), p_wigner.min(), p_wigner.max()]
-
-imag_params = dict(
-    extent=extent,
-    origin='lower',
-    cmap='seismic',
-    aspect=(extent[1] - extent[0]) / (extent[-1] - extent[-2]),
-    norm=WignerNormalize(vmin=-0.1, vmax=0.1)
-    #norm=WignerNormalize()
-)
-
-plt.imshow(W.real, **imag_params)
-plt.colorbar()
-
-plt.xlabel('$x$')
-plt.ylabel('$p$')
+schrodinger_cat =  psi_1 + psi_2 + 0j
+schrodinger_cat /= np.linalg.norm(schrodinger_cat)
+rho_averaged_initial = schrodinger_cat * schrodinger_cat.conj().T
+schrodinger_cat = schrodinger_cat.reshape(-1)
 
 ########################################################################################################################
 #
@@ -127,27 +104,70 @@ plt.ylabel('$p$')
 ########################################################################################################################
 
 # the array to save the averaged density matrix over noise
-rho_averaged = np.zeros_like(W)
+rho_averaged_final = np.zeros_like(rho_averaged_initial)
+
+
+from split_op_schrodinger1D import SplitOpSchrodinger1D, njit
+
+np.random.seed(45)
 
 # loop over noise
-for index in range(1000):
+for index in range(100):
 
-    psi = psi_1 + psi_2 * np.exp(+1j * np.random.normal(loc=0, scale=2.8))
-    psi /= np.linalg.norm(psi)
+    F = np.random.uniform()
+
+    psi = SplitOpSchrodinger1D(
+
+        x_grid_dim=x_grid_dim,
+        x_amplitude=x_amplitude,
+
+        v=njit(lambda x, t: -4. * F * x),
+        k=njit(lambda p, t: 0.5 * p ** 2),
+        dt=0.05
+    ).set_wavefunction(schrodinger_cat).propagate(10).reshape(x.shape)
 
     # form the density matrix out of the wavefunctions
+    psi /= np.linalg.norm(psi)
     rho = psi * psi.conj().T
 
     # Calculate the iterative mean following http://www.heikohoffmann.de/htmlthesis/node134.html
-    rho -= rho_averaged
+    rho -= rho_averaged_final
     rho /= (index + 1)
-    rho_averaged += rho
+    rho_averaged_final += rho
 
-# print(rho_averaged.dot(rho_averaged).trace())
+    print(index)
+
+extent = [x_wigner.min(), x_wigner.max(), p_wigner.min(), p_wigner.max()]
+
+imag_params = dict(
+    extent=extent,
+    origin='lower',
+    cmap='seismic',
+    aspect=(extent[1] - extent[0]) / (extent[-1] - extent[-2]),
+    #norm=WignerNormalize(vmin=-0.1, vmax=0.1)
+    norm=WignerNormalize()
+)
+
+plt.subplot(121)
+
+plt.title("Initial condition $Tr(\hat\\rho^2) = {:.3f}$".format(
+    rho_averaged_initial.dot(rho_averaged_initial).trace().real
+))
+
+plt.imshow(rho2wigner(rho_averaged_initial).real, **imag_params)
+plt.colorbar()
+
+plt.xlabel('$x$')
+plt.ylabel('$p$')
+
 
 plt.subplot(122)
 
-plt.imshow(rho2wigner(rho_averaged).real, **imag_params)
+plt.title("Initial condition $Tr(\hat\\rho^2) = {:.3f}$".format(
+    rho_averaged_final.dot(rho_averaged_final).trace().real
+))
+
+plt.imshow(rho2wigner(rho_averaged_final).real, **imag_params)
 plt.colorbar()
 
 plt.xlabel('$x$')
