@@ -1,4 +1,6 @@
-from split_op_wigner_moyal import SplitOpWignerMoyal, np, ne, warnings
+from split_op_wigner_moyal import SplitOpWignerMoyal, np
+from functools import partial
+import warnings
 
 
 class SplitOpWignerBloch(SplitOpWignerMoyal):
@@ -13,17 +15,27 @@ class SplitOpWignerBloch(SplitOpWignerMoyal):
 
     This implementation follows split_op_wigner_moyal.py
     """
+    def __init__(self, *, dbeta=None, beta=None, **kwargs):
+        """
+        :param dbeta: inverse temperature time step
+        :param beta: inverse temperature
+        :param kwargs: the rest of the arguments to be passed to the parent class
+        """
+        SplitOpWignerMoyal.__init__(self, **kwargs)
+
+        self.dbeta = dbeta
+        self.beta = beta
+
     def setup_bloch_propagator(self):
         """
         Pre-calculate exponents used for the split operator propagation
         """
+        v = (self.v if self.time_independent_v else partial(self.v, t=self.t))
+        k = (self.k if self.time_independent_k else partial(self.k, t=self.t))
+
         # Get the sum of the potential energy contributions
-        self.bloch_expV = ne.evaluate(
-            "-0.25 * dbeta *( ({V_minus}) + ({V_plus}) )".format(
-                V_minus=self.V.format(X="(X - 0.5 * Theta)"),
-                V_plus=self.V.format(X="(X + 0.5 * Theta)"),
-            ),
-            local_dict=vars(self)
+        self.bloch_expV = -0.25 * self.dbeta * (
+            v(self.x - 0.5 * self.Theta) + v(self.x + 0.5 * self.Theta)
         )
 
         # Make sure that the largest value is zero
@@ -33,12 +45,8 @@ class SplitOpWignerBloch(SplitOpWignerMoyal):
         np.exp(self.bloch_expV, out=self.bloch_expV)
 
         # Get the sum of the kinetic energy contributions
-        self.bloch_expK = ne.evaluate(
-            "-0.5 * dbeta *( ({K_plus}) + ({K_minus}) )".format(
-                K_plus=self.K.format(P="(P + 0.5 * Lambda)"),
-                K_minus=self.K.format(P="(P - 0.5 * Lambda)")
-            ),
-            local_dict=vars(self)
+        self.bloch_expK = -0.5 * self.dbeta *(
+                k(self.p + 0.5 * self.Lambda) + k(self.p - 0.5 * self.Lambda)
         )
 
         # Make sure that the largest value is zero
@@ -48,7 +56,7 @@ class SplitOpWignerBloch(SplitOpWignerMoyal):
         np.exp(self.bloch_expK, out=self.bloch_expK)
 
         # Initialize the Wigner function as the infinite temperature Gibbs state
-        self.set_wignerfunction("1. + 0. * X + 0. * P")
+        self.set_wignerfunction(lambda x, p: 1. + 0. * x + 0. * p)
 
     def single_step_bloch_propagation(self):
         """
@@ -77,7 +85,7 @@ class SplitOpWignerBloch(SplitOpWignerMoyal):
         self.wignerfunction = self.transform_theta2p(self.wignerfunction)
 
         # normalization
-        self.wignerfunction /= self.wignerfunction.sum() * self.dXdP
+        self.wignerfunction /= self.wignerfunction.sum() * self.dxdp
 
     def get_thermal_state(self, beta=None, nsteps=5000, max_purity=0.9999):
         """
@@ -96,7 +104,7 @@ class SplitOpWignerBloch(SplitOpWignerMoyal):
             self.single_step_bloch_propagation()
 
             # check that the purity of the state does not exceed one
-            if self.get_purity() > max_purity:
+            if self.get_purity(self.wignerfunction) > max_purity:
                 warnings.warn("purity reached the maximum")
                 break
 
@@ -112,81 +120,7 @@ class SplitOpWignerBloch(SplitOpWignerMoyal):
 
         self.setup_bloch_propagator()
 
-        while self.get_purity() < max_purity:
+        while self.get_purity(self.wignerfunction) < max_purity:
             self.single_step_bloch_propagation()
 
         return self.wignerfunction
-
-##############################################################################
-#
-#   Run some examples
-#
-##############################################################################
-
-if __name__ == '__main__':
-
-    print(SplitOpWignerBloch.__doc__)
-
-    import matplotlib.pyplot as plt
-
-    qsys_params = dict(
-        t=0.,
-        dt=0.05,
-
-        X_gridDIM=256,
-        X_amplitude=10.,
-
-        P_gridDIM=256,
-        P_amplitude=10.,
-
-        beta=1. / 0.7,
-
-        # kinetic energy part of the hamiltonian
-        K="0.5 * {P} ** 2",
-
-        # potential energy part of the hamiltonian
-        V="0.5 * {X} ** 4",
-    )
-
-    print("Calculating the Gibbs state...")
-    gibbs_state = SplitOpWignerBloch(**qsys_params).get_thermal_state()
-
-    # Propagate this state via the Wigner-Moyal equation
-
-    print("Check that the obtained Gibbs state is stationary under the Wigner-Moyal propagation...")
-    propagator = SplitOpWignerMoyal(**qsys_params)
-    final_state = propagator.set_wignerfunction(gibbs_state).propagate(3000)
-
-    ##############################################################################
-    #
-    #   Plot the results
-    #
-    ##############################################################################
-
-    from wigner_normalize import WignerSymLogNorm
-
-    # save common plotting parameters
-    plot_params = dict(
-        origin='lower',
-        extent=[propagator.X.min(), propagator.X.max(), propagator.P.min(), propagator.P.max()],
-        cmap='seismic',
-        # make a logarithmic color plot (see, e.g., http://matplotlib.org/users/colormapnorms.html)
-        norm=WignerSymLogNorm(linthresh=1e-13, vmin=-0.01, vmax=0.1)
-    )
-    plt.subplot(121)
-
-    plt.title("The Gibbs state (initial state)")
-    plt.imshow(gibbs_state, **plot_params)
-    plt.colorbar()
-    plt.xlabel('$x$ (a.u.)')
-    plt.ylabel('$p$ (a.u.)')
-
-    plt.subplot(122)
-
-    plt.title("The Gibbs state after propagation")
-    plt.imshow(final_state, **plot_params)
-    plt.colorbar()
-    plt.xlabel('$x$ (a.u.)')
-    plt.ylabel('$p$ (a.u.)')
-
-    plt.show()

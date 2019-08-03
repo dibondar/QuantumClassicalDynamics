@@ -187,7 +187,8 @@ if __name__ == '__main__':
     #
     ##############################################################################
 
-    plt.subplot(111, axisbg='grey')
+    #plt.subplot(111, axisbg='grey')
+    plt.subplot(111)
     plt.title('1D Dynamical Billiard (phase space)')
 
     # Initiate classical system
@@ -270,7 +271,8 @@ if __name__ == '__main__':
     #
     ##############################################################################
 
-    plt.subplot(111, axisbg='grey')
+    #plt.subplot(111, axisbg='grey')
+    plt.subplot(111)
     plt.title('3D Dynamical Billiard (phase-space projection)')
 
     def grad_V(self, x1, x2, x3):

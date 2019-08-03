@@ -56,6 +56,9 @@ class DynamicVisualized:
 
         @njit
         def v2(x, t=-7.):
+            """
+            Rapidly changing potential energy
+            """
             return 0.01 * (1. - 0.95 / (1. + np.exp(-5. * t))) * x ** 4
 
         # initialize diabatic system (i.e, with fast time dependence)
