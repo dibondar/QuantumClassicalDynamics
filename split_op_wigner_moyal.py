@@ -23,6 +23,11 @@ class SplitOpWignerMoyal(object):
     def __init__(self, *, x_grid_dim, x_amplitude, p_grid_dim, p_amplitude, dt, k, v, t=0,
                  p_rhs=None, x_rhs=None, time_independent_v=True, time_independent_k=True, threads=-1, **kwargs):
         """
+        The Wigner function propagator of the Moyal equation of motion.
+        The Hamiltonian should be of the form H = k(p) + v(x).
+        The potential v(x) and kinetic k(p) energies may depend on time. In that case,
+        set time_independent_v = False and time_independent_k = False.
+
         :param x_grid_dim: the coordinate grid size
         :param p_grid_dim: the momentum grid size
 

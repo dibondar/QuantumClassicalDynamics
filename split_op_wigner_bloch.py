@@ -11,7 +11,7 @@ class SplitOpWignerBloch(SplitOpWignerMoyal):
 
     Details about the method can be found at https://arxiv.org/abs/1602.07288
 
-    The Hamiltonian should be of the form H = K(p) + V(x).
+    The Hamiltonian should be of the form H = k(p) + v(x).
 
     This implementation follows split_op_wigner_moyal.py
     """

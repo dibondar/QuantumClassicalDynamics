@@ -1,21 +1,21 @@
-from split_op_wigner_bloch import np, SplitOpWignerBloch
+from split_op_wigner_moyal import np, SplitOpWignerMoyal
 from numba import njit
 import pyfftw
 
 
-class CaldeiraLeggetMEq(SplitOpWignerBloch):
+class CaldeiraLeggetMEq(SplitOpWignerMoyal):
     """
     The class for propagating the Caldeira-Legget master equation using the methods from
         [*] https://arxiv.org/abs/1212.3406
     """
     def __init__(self, *, D=0, gamma=0, **kwargs):
         """
-        :param D: the dephassing coefficient (see Eq. (36) in Ref. [*])
+        :param D: the dephasing coefficient (see Eq. (36) in Ref. [*])
         :param gamma: the decay coefficient (see Eq. (62) in Ref. [*])
         :param kwargs: parameters passed to the parent class
         """
         # initialize the parent class
-        SplitOpWignerBloch.__init__(self, **kwargs)
+        SplitOpWignerMoyal.__init__(self, **kwargs)
 
         # save new parameters
         self.D = D
@@ -75,7 +75,7 @@ class CaldeiraLeggetMEq(SplitOpWignerBloch):
         # and finally the decay term for dt / 2.
 
         self.decay_term_half_step()
-        SplitOpWignerBloch.single_step_propagation(self)
+        SplitOpWignerMoyal.single_step_propagation(self)
         self.decay_term_half_step()
 
         return self.wignerfunction
