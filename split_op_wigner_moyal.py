@@ -21,7 +21,7 @@ class SplitOpWignerMoyal(object):
     This implementation stores the Wigner function as a 2D real array.
     """
     def __init__(self, *, x_grid_dim, x_amplitude, p_grid_dim, p_amplitude, dt, k, v, t=0,
-                 diff_k=None, diff_v=None, time_independent_v=True, time_independent_k=True, threads=-1, **kwargs):
+                 p_rhs=None, x_rhs=None, time_independent_v=True, time_independent_k=True, threads=-1, **kwargs):
         """
         :param x_grid_dim: the coordinate grid size
         :param p_grid_dim: the momentum grid size
@@ -32,8 +32,8 @@ class SplitOpWignerMoyal(object):
         :param v: the potential energy (as a function)
         :param k: the kinetic energy (as a function)
 
-        :param diff_k: the derivative of the potential energy for the Ehrenfest theorem calculations
-        :param diff_v: the derivative of the kinetic energy for the Ehrenfest theorem calculations
+        :param x_rhs: the rhs of the Ehrenfest theorem for x
+        :param p_rhs: the rhs of the Ehrenfest theorem for p
 
         :param time_independent_v: boolean flag indicated weather potential is time dependent (default is True)
         :param time_independent_k: boolean flag indicated weather kinetic energy is time dependent (default is True)
@@ -55,7 +55,8 @@ class SplitOpWignerMoyal(object):
         self.time_independent_v = time_independent_v
         self.k = k
         self.time_independent_k = time_independent_k
-        self.diff_v = diff_v
+        self.p_rhs = p_rhs
+        self.x_rhs = x_rhs
         self.t = t
         self.dt = dt
 
@@ -78,29 +79,24 @@ class SplitOpWignerMoyal(object):
 
         threads = (cpu_count() if threads < 1 else threads)
 
+        # parameters for FFT
+        self.fft_params = {
+            "overwrite_input": True,
+            "avoid_copy": True,
+            "threads": threads,
+        }
+
         # p x -> theta x
-        self.transform_p2theta = pyfftw.builders.rfft(
-            self.wignerfunction, axis=0,
-            overwrite_input=True,  avoid_copy=True, threads=threads,
-        )
+        self.transform_p2theta = pyfftw.builders.rfft(self.wignerfunction, axis=0, **self.fft_params)
 
         # theta x  ->  p x
-        self.transform_theta2p = pyfftw.builders.irfft(
-            self.transform_p2theta(), axis=0,
-            overwrite_input=True, avoid_copy=True, threads=threads,
-        )
+        self.transform_theta2p = pyfftw.builders.irfft(self.transform_p2theta(), axis=0, **self.fft_params)
 
         # p x  ->  p lambda
-        self.transform_x2lambda = pyfftw.builders.rfft(
-            self.wignerfunction, axis=1,
-            overwrite_input=True, avoid_copy=True, threads=threads,
-        )
+        self.transform_x2lambda = pyfftw.builders.rfft(self.wignerfunction, axis=1, **self.fft_params)
 
         # p lambda  ->  p x
-        self.transform_lambda2x = pyfftw.builders.irfft(
-            self.transform_x2lambda(), axis=1,
-            overwrite_input=True, avoid_copy=True, threads=threads,
-        )
+        self.transform_lambda2x = pyfftw.builders.irfft(self.transform_x2lambda(), axis=1, **self.fft_params)
 
         ########################################################################################
         #
@@ -176,31 +172,31 @@ class SplitOpWignerMoyal(object):
         )
 
         # Check whether the necessary terms are specified to calculate the Ehrenfest theorems
-        if diff_v and diff_k:
+        if p_rhs and x_rhs:
 
             # codes to calculate the first-order Ehrenfest theorems
-            self.get_x_average = njit(lambda wignerfunction: np.sum(wignerfunction * x))
-            self.get_p_average = njit(lambda wignerfunction: np.sum(wignerfunction * p))
+            self.get_x_average = njit(lambda wignerfunction: np.sum(wignerfunction * x) * dxdp)
+            self.get_p_average = njit(lambda wignerfunction: np.sum(wignerfunction * p) * dxdp)
 
             if time_independent_v:
-                _diff_v = diff_v(x)
-                self.get_p_average_rhs = njit(lambda wignerfunction, t: np.sum(wignerfunction * _diff_v))
+                _p_rhs = p_rhs(x, p)
+                self.get_p_average_rhs = njit(lambda wignerfunction, t: np.sum(wignerfunction * _p_rhs) * dxdp)
 
                 _v = v(x)
-                self.get_v_average = njit(lambda wignerfunction, t: np.sum(wignerfunction * _v))
+                self.get_v_average = njit(lambda wignerfunction, t: np.sum(wignerfunction * _v * dxdp))
             else:
-                self.get_p_average_rhs = njit(lambda wignerfunction, t: np.sum(wignerfunction * diff_v(x, t)))
-                self.get_v_average = njit(lambda wignerfunction, t: np.sum(wignerfunction * v(x, t)))
+                self.get_p_average_rhs = njit(lambda wignerfunction, t: np.sum(wignerfunction * p_rhs(x, p, t)) * dxdp)
+                self.get_v_average = njit(lambda wignerfunction, t: np.sum(wignerfunction * v(x, t)) * dxdp)
 
             if time_independent_k:
-                _diff_k = diff_k(p)
-                self.get_x_average_rhs = njit(lambda wignerfunction, t: np.sum(wignerfunction * _diff_k))
+                _x_rhs = x_rhs(p)
+                self.get_x_average_rhs = njit(lambda wignerfunction, t: np.sum(wignerfunction * _x_rhs) * dxdp)
 
                 _k = k(p)
-                self.get_k_average = njit(lambda wignerfunction, t: np.sum(wignerfunction * _k))
+                self.get_k_average = njit(lambda wignerfunction, t: np.sum(wignerfunction * _k) * dxdp)
             else:
-                self.get_x_average_rhs = njit(lambda wignerfunction, t: np.sum(wignerfunction * diff_k(p, t)))
-                self.get_k_average = njit(lambda wignerfunction, t: np.sum(wignerfunction * k(p, t)))
+                self.get_x_average_rhs = njit(lambda wignerfunction, t: np.sum(wignerfunction * x_rhs(x, p, t)) * dxdp)
+                self.get_k_average = njit(lambda wignerfunction, t: np.sum(wignerfunction * k(p, t)) * dxdp)
 
             # since the variable time propagator is used, we record the time when expectation values are calculated
             self.times = []
@@ -286,17 +282,15 @@ class SplitOpWignerMoyal(object):
             dxdp = self.dxdp
             t = self.t
 
-            self.x_average.append(self.get_x_average(wignerfunction) * dxdp)
-            self.p_average.append(self.get_p_average(wignerfunction) * dxdp)
+            self.x_average.append(self.get_x_average(wignerfunction))
+            self.p_average.append(self.get_p_average(wignerfunction))
 
-            self.p_average_rhs.append(-self.get_p_average_rhs(wignerfunction, t) * dxdp)
+            self.p_average_rhs.append(self.get_p_average_rhs(wignerfunction, t))
 
-            self.x_average_rhs.append(self.get_x_average_rhs(wignerfunction, t) * dxdp)
+            self.x_average_rhs.append(self.get_x_average_rhs(wignerfunction, t))
 
             self.hamiltonian_average.append(
-                self.get_k_average(wignerfunction, t) * dxdp
-                +
-                self.get_v_average(wignerfunction, t) * dxdp
+                self.get_k_average(wignerfunction, t) + self.get_v_average(wignerfunction, t)
             )
 
             # save the current time

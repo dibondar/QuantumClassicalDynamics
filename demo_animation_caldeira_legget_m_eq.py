@@ -1,20 +1,16 @@
 """
-Demonstrate the Wigner-Moyal split operator propagator
+Demo for the Caldeira-Legget master equation
 """
-
-from split_op_wigner_moyal import SplitOpWignerMoyal, np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
-
-# Use the documentation string for the developed class
-print(SplitOpWignerMoyal.__doc__)
+from caldeira_legget_master_eq import CaldeiraLeggetMEq, np
 
 
 class VisualizeDynamicsPhaseSpace:
     """
-    Class to visualize the Wigner function function dynamics in phase space.
+    Class to visualize the Wigner function function dynamics in phase space
+    within the Caldeira-Legget master equation
     """
-
     def __init__(self, fig):
         """
         Initialize all propagators and frame
@@ -60,11 +56,15 @@ class VisualizeDynamicsPhaseSpace:
         :return:
         """
         omega = 1.
+        gamma = 1e-1
 
-        self.quant_sys = SplitOpWignerMoyal(
+        self.quant_sys = CaldeiraLeggetMEq(
             t=0,
 
             dt=0.05,
+
+            D=1e-1,
+            gamma=gamma,
 
             x_grid_dim=256,
             x_amplitude=10.,
@@ -80,7 +80,7 @@ class VisualizeDynamicsPhaseSpace:
 
             # these functions are used for evaluating the Ehrenfest theorems
             x_rhs=lambda p: p,
-            p_rhs=lambda x, p: omega ** 2 * x,
+            p_rhs=lambda x, p: -omega ** 2 * x - 2. * gamma * p,
         )
 
         # set randomised initial condition
@@ -99,7 +99,8 @@ class VisualizeDynamicsPhaseSpace:
         :return: image objects
         """
         # propagate the wigner function
-        self.img.set_array(self.quant_sys.propagate(20))
+        self.img.set_array(self.quant_sys.wignerfunction)
+        self.quant_sys.propagate(20)
         return self.img,
 
 
@@ -144,7 +145,7 @@ plt.subplot(132)
 plt.title("The second Ehrenfest theorem verification")
 
 plt.plot(times, np.gradient(quant_sys.p_average, dt), 'r-', label='$d\\langle p \\rangle/dt$')
-plt.plot(times, quant_sys.p_average_rhs, 'b--', label='$\\langle -\\partial V/\\partial x \\rangle$')
+plt.plot(times, quant_sys.p_average_rhs, 'b--', label='$\\langle -\\partial V/\\partial x \\rangle - 2\gamma \\langle p \\rangle$')
 
 plt.legend()
 plt.xlabel('time $t$ (a.u.)')
