@@ -150,6 +150,12 @@ class SplitOpSchrodinger1D(object):
             # List where the expectation value of the Hamiltonian will be calculated
             self.hamiltonian_average = []
 
+            # List where the expectation value of the kinetic energy will be stored
+            self.k_average = []
+
+            # List where the expectation value of the potential energy will be stored
+            self.v_average = []
+
             # Allocate array for storing coordinate or momentum density of the wavefunction
             self.density = np.zeros(self.wavefunction.shape, dtype=np.float)
 
@@ -247,8 +253,14 @@ class SplitOpSchrodinger1D(object):
 
             self.x_average_rhs.append(self.get_x_average_rhs(self.density, self.t))
 
+            # save the kinetic energy
+            self.k_average.append(self.get_k_average(self.density, self.t))
+
+            # save the potential energy
+            self.v_average.append(self.get_v_average(self.density, 0))
+
             # add the kinetic energy to get the hamiltonian
-            self.hamiltonian_average[-1] += self.get_k_average(self.density, self.t)
+            self.hamiltonian_average[-1] += self.k_average[-1]
 
     def set_wavefunction(self, wavefunc):
         """
