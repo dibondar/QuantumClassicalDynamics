@@ -80,7 +80,7 @@ class VisualizeDynamicsPhaseSpace:
 
             # these functions are used for evaluating the Ehrenfest theorems
             x_rhs=lambda p: p,
-            p_rhs=lambda x, p: omega ** 2 * x,
+            p_rhs=lambda x, p: -omega ** 2 * x,
         )
 
         # set randomised initial condition

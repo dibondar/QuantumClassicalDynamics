@@ -21,7 +21,7 @@ class SplitOpWignerMoyal(object):
     This implementation stores the Wigner function as a 2D real array.
     """
     def __init__(self, *, x_grid_dim, x_amplitude, p_grid_dim, p_amplitude, dt, k, v, t=0,
-                 p_rhs=None, x_rhs=None, time_independent_v=True, time_independent_k=True, threads=-1, **kwargs):
+                 p_rhs=None, x_rhs=None, threads=-1, **kwargs):
         """
         The Wigner function propagator of the Moyal equation of motion.
         The Hamiltonian should be of the form H = k(p) + v(x).
@@ -40,9 +40,6 @@ class SplitOpWignerMoyal(object):
         :param x_rhs: the rhs of the Ehrenfest theorem for x
         :param p_rhs: the rhs of the Ehrenfest theorem for p
 
-        :param time_independent_v: boolean flag indicated weather potential is time dependent (default is True)
-        :param time_independent_k: boolean flag indicated weather kinetic energy is time dependent (default is True)
-
         :param t: initial value of time
         :param dt: initial time increment
 
@@ -57,16 +54,14 @@ class SplitOpWignerMoyal(object):
         self.x_amplitude = x_amplitude
         self.p_amplitude = p_amplitude
         self.v = v
-        self.time_independent_v = time_independent_v
         self.k = k
-        self.time_independent_k = time_independent_k
         self.p_rhs = p_rhs
         self.x_rhs = x_rhs
         self.t = t
         self.dt = dt
 
         # make sure self.x_grid_dim and self.p_grid_dim has a value of power of 2
-        assert 2 ** int(np.log2(self.p_grid_dim)) == self.x_grid_dim and \
+        assert 2 ** int(np.log2(self.x_grid_dim)) == self.x_grid_dim and \
                2 ** int(np.log2(self.p_grid_dim)) == self.p_grid_dim, \
             "A value of the grid sizes (x_grid_dim and p_grid_dim) must be a power of 2"
 
@@ -133,6 +128,20 @@ class SplitOpWignerMoyal(object):
         # (take only first half, as required by the real fft)
         Theta = self.Theta = np.arange(1 + self.p_grid_dim // 2)[:, np.newaxis] * (np.pi / self.p_amplitude)
 
+        # Decide whether the potential depends on time
+        try:
+            v(x, 0)
+            time_independent_v = False
+        except TypeError:
+            time_independent_v = True
+
+        # Decide whether the kinetic energy depends on time
+        try:
+            k(p, 0)
+            time_independent_k = False
+        except TypeError:
+            time_independent_k = True
+
         # Define the functions performing multiplication by the phase factor associated with the potential energy
         if time_independent_v:
             # pre-calculate the potential dependent phase since it is time-independent
@@ -143,6 +152,8 @@ class SplitOpWignerMoyal(object):
                 wignerfunction *= _expV
 
         else:
+            v = njit(v)
+
             # the phase factor is time-dependent
             @njit
             def expV(wignerfunction, t):
@@ -162,6 +173,8 @@ class SplitOpWignerMoyal(object):
                 wignerfunction *= _expK
 
         else:
+            k = njit(k)
+
             # the phase factor is time-dependent
             @njit
             def expK(wignerfunction, t):
@@ -190,6 +203,8 @@ class SplitOpWignerMoyal(object):
                 _v = v(x)
                 self.get_v_average = njit(lambda wignerfunction, t: np.sum(wignerfunction * _v * dxdp))
             else:
+                p_rhs = njit(p_rhs)
+
                 self.get_p_average_rhs = njit(lambda wignerfunction, t: np.sum(wignerfunction * p_rhs(x, p, t)) * dxdp)
                 self.get_v_average = njit(lambda wignerfunction, t: np.sum(wignerfunction * v(x, t)) * dxdp)
 
@@ -200,6 +215,8 @@ class SplitOpWignerMoyal(object):
                 _k = k(p)
                 self.get_k_average = njit(lambda wignerfunction, t: np.sum(wignerfunction * _k) * dxdp)
             else:
+                x_rhs = njit(x_rhs)
+
                 self.get_x_average_rhs = njit(lambda wignerfunction, t: np.sum(wignerfunction * x_rhs(x, p, t)) * dxdp)
                 self.get_k_average = njit(lambda wignerfunction, t: np.sum(wignerfunction * k(p, t)) * dxdp)
 

@@ -22,20 +22,38 @@ class RecoverHamiltonian:
         # normalize the wavefunction over the first axis (basis)
         wavefunctions /= linalg.norm(wavefunctions, axis=1)[:, np.newaxis]
 
-        # calculate the auto correlation function
-        auto_corr = wavefunctions @ wavefunctions[0].conj()
-
         # calculate the alternating sequence of signs for iFFT autocorrelation function
         k = np.arange(wavefunctions.shape[0])
-        minus = (-1) ** k
+        minus = (-1) ** k[:, np.newaxis]
 
         # energy axis (as prescribed by Method 1 for calculating Fourier transform
         energy_range = (k - k.size / 2) * np.pi / (0.5 * dt * k.size)
 
-        # the windowed fft of the auto correlation function
-        auto_corr_fft_w = np.abs(
-            fftpack.ifft(minus * auto_corr * blackman(auto_corr.size), overwrite_x=True)
+        # the windowed fft of the wave function with respect to the time axis
+        wavefunctions_fft_w = fftpack.ifft(
+            minus * wavefunctions * blackman(k.size)[:, np.newaxis],
+            axis=0,
+            overwrite_x=True
         )
+        wavefunctions_fft_w *= minus
+
+
+        weight = linalg.norm(wavefunctions_fft_w, axis=1)
+        weight /= weight.max()
+
+        # extract peaks in weight to get the eigen energies
+        #peaks, _ = find_peaks(weight, height=threshold, **kwargs)
+        peaks = np.nonzero(weight > threshold)
+
+        # the eigenvalues of the Hamiltonian
+        energies = energy_range[peaks]
+
+        self.weight = weight
+        self.energy_range = energy_range
+
+        """
+        #############################################################################################
+
 
         # normalize the auto correlation function
         auto_corr_fft_w /= auto_corr_fft_w.max()
@@ -57,6 +75,7 @@ class RecoverHamiltonian:
             overwrite_x=True
         )
         wavefunctions_fft_w *= minus
+        """
 
         # extract the eigenfunctions of the unknown hamiltonian
         eigenvects = wavefunctions_fft_w[peaks]
@@ -66,8 +85,8 @@ class RecoverHamiltonian:
 
         # remove the numerical noise by orthogonalizing the extracted basis
         # This is a numerically stable version of the Gramm Schmidt
-        eigenvects, _ = linalg.qr(eigenvects.T, mode='economic', overwrite_a=True)
-        eigenvects = eigenvects.T
+        # eigenvects, _ = linalg.qr(eigenvects.T, mode='economic', overwrite_a=True)
+        # eigenvects = eigenvects.T
 
         # saving the results of recovering
         self.energies = energies
