@@ -2,6 +2,7 @@ import numpy as np
 # in other codes, we have used scipy.fftpack to perform Fourier Transforms.
 # In this code, we will use pyfftw, which is more suited for efficient large data
 import pyfftw
+import pickle
 from numba import njit
 from numba.targets.registry import CPUDispatcher
 from types import FunctionType
@@ -21,7 +22,7 @@ class SplitOpWignerMoyal(object):
     This implementation stores the Wigner function as a 2D real array.
     """
     def __init__(self, *, x_grid_dim, x_amplitude, p_grid_dim, p_amplitude, dt, k, v, t=0,
-                 p_rhs=None, x_rhs=None, threads=-1, **kwargs):
+                 p_rhs=None, x_rhs=None, threads=-1, fftw_wisdom_fname='fftw.wisdom', **kwargs):
         """
         The Wigner function propagator of the Moyal equation of motion.
         The Hamiltonian should be of the form H = k(p) + v(x).
@@ -44,6 +45,8 @@ class SplitOpWignerMoyal(object):
         :param dt: initial time increment
 
         :param threads: number of threads to be used for FFT (default all)
+
+        :param fftw_wisdom_fname: File name from where the FFT wisdom will be loaded from and saved to
 
         :param kwargs: ignored
         """
@@ -71,6 +74,13 @@ class SplitOpWignerMoyal(object):
         #
         ########################################################################################
 
+        # Load the FFTW wisdom
+        try:
+            with open(fftw_wisdom_fname, 'rb') as fftw_wisdow:
+                pyfftw.import_wisdom(pickle.load(fftw_wisdow))
+        except FileNotFoundError:
+            pass
+
         # Turn on the cache for optimum performance
         pyfftw.interfaces.cache.enable()
 
@@ -84,6 +94,7 @@ class SplitOpWignerMoyal(object):
             "overwrite_input": True,
             "avoid_copy": True,
             "threads": threads,
+            "planner_effort": "FFTW_PATIENT",
         }
 
         # p x -> theta x
@@ -97,6 +108,10 @@ class SplitOpWignerMoyal(object):
 
         # p lambda  ->  p x
         self.transform_lambda2x = pyfftw.builders.irfft(self.transform_x2lambda(), axis=1, **self.fft_params)
+
+        # Save the FFTW wisdom
+        with open(fftw_wisdom_fname, 'wb') as fftw_wisdow:
+            pickle.dump(pyfftw.export_wisdom(), fftw_wisdow)
 
         ########################################################################################
         #
