@@ -21,8 +21,8 @@ class SplitOpWignerMoyal(object):
 
     This implementation stores the Wigner function as a 2D real array.
     """
-    def __init__(self, *, x_grid_dim, x_amplitude, p_grid_dim, p_amplitude, dt, k, v, t=0,
-                 p_rhs=None, x_rhs=None, threads=-1, fftw_wisdom_fname='fftw.wisdom', **kwargs):
+    def __init__(self, *, x_grid_dim, x_amplitude, p_grid_dim, p_amplitude, dt, k, v, t=0, D=0, p_rhs=None, x_rhs=None,
+                 threads=-1, fftw_wisdom_fname='fftw.wisdom', planner_effort='FFTW_MEASURE', **kwargs):
         """
         The Wigner function propagator of the Moyal equation of motion.
         The Hamiltonian should be of the form H = k(p) + v(x).
@@ -44,11 +44,14 @@ class SplitOpWignerMoyal(object):
         :param t: initial value of time
         :param dt: initial time increment
 
+        :param D: the decoherence term (i.e., quantum diffusion). see Eq. (36) of https://arxiv.org/abs/1212.3406
+
         :param threads: number of threads to be used for FFT (default all)
 
         :param fftw_wisdom_fname: File name from where the FFT wisdom will be loaded from and saved to
 
         :param kwargs: ignored
+        :param planner_effort: a string dictating how much effort is spent in planning the FFTW routines
         """
 
         # save all attributes
@@ -62,6 +65,7 @@ class SplitOpWignerMoyal(object):
         self.x_rhs = x_rhs
         self.t = t
         self.dt = dt
+        self.D = D
 
         # make sure self.x_grid_dim and self.p_grid_dim has a value of power of 2
         assert 2 ** int(np.log2(self.x_grid_dim)) == self.x_grid_dim and \
@@ -94,7 +98,7 @@ class SplitOpWignerMoyal(object):
             "overwrite_input": True,
             "avoid_copy": True,
             "threads": threads,
-            "planner_effort": "FFTW_PATIENT",
+            "planner_effort": planner_effort,
         }
 
         # p x -> theta x
@@ -149,6 +153,7 @@ class SplitOpWignerMoyal(object):
             time_independent_v = False
         except TypeError:
             time_independent_v = True
+        self.time_independent_v = time_independent_v
 
         # Decide whether the kinetic energy depends on time
         try:
@@ -156,11 +161,15 @@ class SplitOpWignerMoyal(object):
             time_independent_k = False
         except TypeError:
             time_independent_k = True
+        self.time_independent_k = time_independent_k
 
         # Define the functions performing multiplication by the phase factor associated with the potential energy
         if time_independent_v:
             # pre-calculate the potential dependent phase since it is time-independent
-            _expV = np.exp(-0.5j * dt * (v(x - 0.5 * Theta) - v(x + 0.5 * Theta)))
+            _expV = np.exp(
+                -0.5j * dt * (v(x - 0.5 * Theta) - v(x + 0.5 * Theta))
+                -0.5 * dt * D * Theta ** 2 # the decoherence term
+            )
 
             @njit
             def expV(wignerfunction, t):
@@ -174,6 +183,7 @@ class SplitOpWignerMoyal(object):
             def expV(wignerfunction, t):
                 wignerfunction *= np.exp(-0.5j * dt * (
                                     v(x - 0.5 * Theta, t) - v(x + 0.5 * Theta, t)
+                                        -0.5 * dt * D * Theta ** 2 # the decoherence term
                             ))
 
         self.expV = expV

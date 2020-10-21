@@ -1,6 +1,5 @@
-from split_op_wigner_moyal import np, SplitOpWignerMoyal
-from numba import njit
-import pyfftw
+import numpy as np
+from split_op_wigner_moyal import SplitOpWignerMoyal
 
 
 class CaldeiraLeggetMEq(SplitOpWignerMoyal):
@@ -8,109 +7,81 @@ class CaldeiraLeggetMEq(SplitOpWignerMoyal):
     The class for propagating the Caldeira-Legget master equation using the methods from
         [*] https://arxiv.org/abs/1212.3406
     """
-    def __init__(self, *, D=0, gamma=0, **kwargs):
+    def __init__(self, *, gamma=0, **kwargs):
         """
-        :param D: the dephasing coefficient (see Eq. (36) in Ref. [*])
-        :param gamma: the decay coefficient (see Eq. (62) in Ref. [*])
-        :param kwargs: parameters passed to the parent class
+        Propagator for the Caldeira-Leggett model
+        :param gamma: the decay coefficient in the dissipatr D[rho] = -gamma * [x, {p, rho}] (See Eq. (62) of [*]).
+        :param kwargs: parameters to be passed to the parent class SplitOpWignerMoyal
         """
-        # initialize the parent class
-        SplitOpWignerMoyal.__init__(self, **kwargs)
-
-        # save new parameters
-        self.D = D
         self.gamma = gamma
+        super().__init__(**kwargs)
 
-        # if the dephasing term is nonzero, modify the potential energy phase
-        # Note that the dephasing term does not modify the Ehrenfest theorems
-        if D:
-            # introduce some aliases
-            v = self.v
-            x = self.x
-            dt = self.dt
-            Theta = self.Theta
-
-            # Introduce the action of the dephasing term by redefining the potential term
-            if self.time_independent_v:
-                # pre-calculate the potential dependent phase since it is time-independent
-                _expV = np.exp(-0.5j * dt * (v(x - 0.5 * Theta) - v(x + 0.5 * Theta)) - 0.5 * dt * D * Theta ** 2)
-
-                @njit
-                def expV(wignerfunction, t):
-                    wignerfunction *= _expV
-
-            else:
-                # the phase factor is time-dependent
-                @njit
-                def expV(wignerfunction, t):
-                    wignerfunction *= np.exp(-0.5j * dt * (
-                                        v(x - 0.5 * Theta, t) - v(x + 0.5 * Theta, t) - 0.5 * dt * D * Theta ** 2
-                                ))
-
-            self.expV = expV
-
-        # if the decay term is nonzero, prepare for
-        if gamma:
-
-            # allocate an array for the extra copy of the Wigner function, i.e., for W^{(1)} in Eq. (63) of Ref. [*]
-            self.wigner_1 = pyfftw.empty_aligned(self.wignerfunction.shape, dtype=self.wignerfunction.dtype)
-
-            # p x -> theta x for self.wigner_1
-            self.wigner_1_transform_p2theta = pyfftw.builders.rfft(self.wigner_1, axis=0, **self.fft_params)
-
-            # theta x  ->  p x for self.wigner_1
-            self.wigner_1_transform_theta2p = pyfftw.builders.irfft(
-                self.wigner_1_transform_p2theta(), axis=0, **self.fft_params
-            )
+        # an array for storing the copy of the wigner function is needed for method self.apply_friction_half_dt
+        self.wignerfunction_copy = np.empty_like(self.wignerfunction)
 
     def single_step_propagation(self):
         """
-        Overload the method in the parent class.
+        Overload the method of the parent class.
         Perform single step propagation. The final Wigner function is not normalized.
         :return: self.wignerfunction
         """
-
         # In order to get the third order propagator, we incorporate the decay term (Eq. (62) from Ref. [*]) using
         # the splitting scheme where we first apply the decay term for dt / 2, then the unitary propagator for full dt,
         # and finally the decay term for dt / 2.
+        if self.gamma:
+            self.apply_friction_half_dt()
 
-        self.decay_term_half_step()
-        SplitOpWignerMoyal.single_step_propagation(self)
-        self.decay_term_half_step()
+        super(CaldeiraLeggetMEq, self).single_step_propagation()
 
-        return self.wignerfunction
+        if self.gamma:
+            self.apply_friction_half_dt()
 
-    def decay_term_half_step(self):
+    def apply_friction_half_dt(self):
         """
-        Apply the decay term (Eq. (62) from Ref. [*]) for half a time-step.
+        Applying the friction dissipator onto the wigner function for half time step
+        utilizing Eq. (62) of https://arxiv.org/abs/1212.3406
         :return: None
         """
-        if self.gamma:
+        # copy the current wigner function
+        np.copyto(self.wignerfunction_copy, self.wignerfunction)
 
-            # declare aliases
-            wigner_1 = self.wigner_1
+        ##############################################################
+        #
+        # Eq. (65) of Ref. [*]
+        #
+        ##############################################################
+        self.wignerfunction *= self.p
+        # p x -> theta x
+        self.wignerfunction = self.transform_p2theta(self.wignerfunction)
+        self.wignerfunction *= self.Theta
+        self.wignerfunction *= 0.5j * self.dt * self.gamma
+        # theta x  ->  p x
+        self.wignerfunction = self.transform_theta2p(self.wignerfunction)
 
-            np.copyto(wigner_1, self.wignerfunction)
+        ##############################################################
+        #
+        # Eq. (64) of Ref. [*]
+        #
+        ##############################################################
+        self.wignerfunction += self.wignerfunction_copy
 
-            # Eq. (65) of Ref. [*]
-            wigner_1 *= self.p
-            wigner_1 = self.wigner_1_transform_p2theta(wigner_1)
+        ##############################################################
+        #
+        # Eq. (63) of Ref. [*]
+        # starts with doing Eq. (65) again
+        #
+        ##############################################################
+        self.wignerfunction *= self.p
+        # p x -> theta x
+        self.wignerfunction = self.transform_p2theta(self.wignerfunction)
+        self.wignerfunction *= self.Theta
+        self.wignerfunction *= 1j * self.dt * self.gamma
+        # theta x  ->  p x
+        self.wignerfunction = self.transform_theta2p(self.wignerfunction)
 
-            wigner_1 *= self.Theta
-            wigner_1 *= 0.5j * self.dt * self.gamma
-            wigner_1 = self.wigner_1_transform_theta2p(wigner_1)
-
-            # Eq. (64) of Ref. [*]
-            wigner_1 += self.wignerfunction
-
-            # Eq. (63) of Ref. [*]
-            #   it starts with doing Eq. (65) again
-            wigner_1 *= self.p
-            wigner_1 = self.wigner_1_transform_p2theta(wigner_1)
-            wigner_1 *= self.Theta
-            wigner_1 *= 1j * self.dt * self.gamma
-            wigner_1 = self.wigner_1_transform_theta2p(wigner_1)
-
-            self.wignerfunction += wigner_1
-
-            self.wigner_1 = wigner_1
+        ##############################################################
+        #
+        # Eq. (63) of Ref. [*]
+        #
+        ##############################################################
+        self.wignerfunction += self.wignerfunction_copy

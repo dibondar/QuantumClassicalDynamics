@@ -42,8 +42,8 @@ class RecoverHamiltonian:
         weight /= weight.max()
 
         # extract peaks in weight to get the eigen energies
-        #peaks, _ = find_peaks(weight, height=threshold, **kwargs)
-        peaks = np.nonzero(weight > threshold)
+        peaks, _ = find_peaks(weight, height=threshold, **kwargs)
+        #peaks = np.nonzero(weight > threshold)
 
         # the eigenvalues of the Hamiltonian
         energies = energy_range[peaks]
@@ -85,8 +85,8 @@ class RecoverHamiltonian:
 
         # remove the numerical noise by orthogonalizing the extracted basis
         # This is a numerically stable version of the Gramm Schmidt
-        # eigenvects, _ = linalg.qr(eigenvects.T, mode='economic', overwrite_a=True)
-        # eigenvects = eigenvects.T
+        eigenvects, _ = linalg.qr(eigenvects.T, mode='economic', overwrite_a=True)
+        eigenvects = eigenvects.T
 
         # saving the results of recovering
         self.energies = energies
