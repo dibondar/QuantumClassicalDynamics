@@ -4,7 +4,7 @@ import numpy as np
 import pyfftw
 import pickle
 from numba import njit
-from numba.targets.registry import CPUDispatcher
+from numba.core.registry import CPUDispatcher
 from types import FunctionType
 from multiprocessing import cpu_count
 

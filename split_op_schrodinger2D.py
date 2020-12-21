@@ -2,7 +2,7 @@ import numpy as np
 from scipy import fftpack # Tools for fourier transform
 from scipy import linalg # Linear algebra for dense matrix
 from numba import njit
-from numba.targets.registry import CPUDispatcher
+from numba.core.registry import CPUDispatcher
 from types import FunctionType
 
 class SplitOpSchrodinger2D(object):
