@@ -183,8 +183,9 @@ class SplitOpWignerMoyal(object):
             def expV(wignerfunction, t):
                 wignerfunction *= np.exp(-0.5j * dt * (
                                     v(x - 0.5 * Theta, t) - v(x + 0.5 * Theta, t)
-                                        -0.5 * dt * D * Theta ** 2 # the decoherence term
-                            ))
+                                    )
+                                    -0.5 * dt * D * Theta ** 2 # the decoherence term
+                                )
 
         self.expV = expV
 
