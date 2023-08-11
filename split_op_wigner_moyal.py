@@ -89,7 +89,7 @@ class SplitOpWignerMoyal(object):
         pyfftw.interfaces.cache.enable()
 
         # allocate the array for Wigner function
-        self.wignerfunction = pyfftw.empty_aligned((self.p_grid_dim, self.x_grid_dim), dtype=np.float)
+        self.wignerfunction = pyfftw.empty_aligned((self.p_grid_dim, self.x_grid_dim), dtype=float)
 
         threads = (cpu_count() if threads < 1 else threads)
 
