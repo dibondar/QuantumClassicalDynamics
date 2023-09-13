@@ -52,7 +52,7 @@ class SplitOpSchrodinger1D(object):
         p = self.p = (np.arange(self.x_grid_dim) - self.x_grid_dim / 2) * (np.pi / self.x_amplitude)
 
         # allocate the array for wavefunction
-        self.wavefunction = np.zeros(self.x.size, dtype=np.complex)
+        self.wavefunction = np.zeros(self.x.size, dtype=complex)
 
         ####################################################################################################
         #
@@ -156,7 +156,7 @@ class SplitOpSchrodinger1D(object):
             self.v_average = []
 
             # Allocate array for storing coordinate or momentum density of the wavefunction
-            self.density = np.zeros(self.wavefunction.shape, dtype=np.float)
+            self.density = np.zeros(self.wavefunction.shape, dtype=float)
 
             # sequence of alternating signs for getting the wavefunction in the momentum representation
             self.minus = (-1) ** np.arange(self.x_grid_dim)
@@ -275,7 +275,7 @@ class SplitOpSchrodinger1D(object):
                 "The grid size does not match with the wave function"
 
             # make sure the wavefunction is stored as a complex array
-            np.copyto(self.wavefunction, wavefunc.astype(np.complex))
+            np.copyto(self.wavefunction, wavefunc.astype(complex))
 
         else:
             try:
